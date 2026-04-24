@@ -1526,6 +1526,8 @@ function looksLikeCookingStep(s){
 function parseRecipeText(text){
   // Step 1: strip website junk
   text=cleanWebJunk(text);
+  // Step 2: normalise markdown — convert ## headings to plain text, strip bold/italic markers
+  text=text.replace(/^#{1,6}\s+/gm,'').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/\*([^*]+)\*/g,'$1').replace(/^[-*]\s+/gm,'• ');
 
   // Detect ingredient & instruction sections
   const ingrRx=/^(?:ingredients?|what you'?ll? need|shopping list)[:\s]*/im;
@@ -1730,7 +1732,36 @@ async function tryFetch(url){
   ];
   let lastErr='';
   for(const proxy of proxies){try{return await proxy();}catch(e){lastErr=e.message;}}
-  throw new Error(`Could not fetch page (${lastErr}). Try copying the recipe text and using Paste Text instead.`);
+  throw new Error(lastErr);
+}
+
+// Jina reader — returns clean markdown, bypasses Cloudflare & JS-rendered sites
+async function tryJina(url){
+  const r=await fetch(`https://r.jina.ai/${url}`,{
+    headers:{'Accept':'text/markdown','X-Return-Format':'markdown'},
+    signal:AbortSignal.timeout(20000)
+  });
+  if(!r.ok)throw new Error(`Jina ${r.status}`);
+  const t=await r.text();
+  if(t.length<200)throw new Error('Jina empty response');
+  return t;
+}
+
+// Parse Jina markdown into a recipe object
+function parseMarkdownRecipe(md,url){
+  // Extract title from first H1 or H2
+  const titleM=md.match(/^#{1,2}\s+(.+)/m);
+  const name=(titleM?titleM[1]:'').replace(/\*+/g,'').trim();
+  // Extract OG image from markdown (Jina sometimes includes ![...](url))
+  const imgM=md.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
+  const image=imgM?imgM[1]:'';
+  // Run through the text parser
+  const parsed=parseRecipeText(md);
+  return{
+    name,description:'',image,yield:'',difficulty:'Intermediate',cookware:[],
+    ingredients:parsed.ingredients.length?[{section:'Ingredients',items:parsed.ingredients}]:[],
+    steps:parsed.steps
+  };
 }
 
 async function fetchFromURL(){
@@ -1741,7 +1772,21 @@ async function fetchFromURL(){
   state.addForm.urlStatus='loading';state.addForm.urlError='';state.addForm.urlParsed=null;
   renderAdd();
   try{
-    const html=await tryFetch(url);
+    // Try HTML proxies first (gives JSON-LD access), then fall back to Jina markdown
+    let html=null,useJina=false;
+    try{html=await tryFetch(url);}catch(e){
+      try{html=await tryJina(url);useJina=true;}catch(e2){
+        throw new Error('Could not fetch the page. The site may block automated access. Try copying the recipe text and using Paste Text instead.');
+      }
+    }
+    // Jina path: parse markdown directly, no DOM/JSON-LD
+    if(useJina){
+      const parsed=parseMarkdownRecipe(html,url);
+      state.addForm.urlParsed=parsed;
+      state.addForm.urlStatus=parsed.steps.length?'success':'partial';
+      state.addForm.urlError=parsed.steps.length?'':'Recipe found but steps could not be extracted. Try Paste Text.';
+      renderAdd();return;
+    }
     const doc=new DOMParser().parseFromString(html,'text/html');
     // Try all JSON-LD blocks
     let node=null;
