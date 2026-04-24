@@ -1034,7 +1034,7 @@ function renderDetail(){
     const items=(r.cookware||[]);
     tabContent=items.length?`<div class="tab-content">${items.map(c=>`<div class="cw-item"><span class="cw-dot"></span>${escH(c)}</div>`).join('')}</div>`:`<div style="padding:16px 18px;color:var(--text-3);font-size:.9rem">No cookware listed.</div>`;
   }else{
-    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(s.title)}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}
+    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(summarizeStepTitle(s.instructions)||s.title)}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}
     <div style="padding:18px 0 4px"><button class="btn btn-ghost btn-full" onclick="state._fullFrom='detail';go('full',{id:${r.id}})">${I.list} View full recipe</button></div>
     </div>`;
   }
@@ -1107,7 +1107,7 @@ function renderGuided(){
           <span class="guided-phase-dot" style="background:${color}"></span>
           <span style="color:${color}">${escH(step.phase)}</span>
         </div>
-        <div class="guided-title">${escH(step.title)}</div>
+        <div class="guided-title">${escH(summarizeStepTitle(step.instructions)||step.title)}</div>
         <div class="guided-instructions">${escH(step.instructions)}</div>
         ${step.tip?`<div class="guided-tip"><div class="guided-tip-label">Tip</div>${escH(step.tip)}</div>`:''}
         ${stepImg}
@@ -1149,52 +1149,70 @@ function renderComplete(){
 // ═══════════════════════════════════════
 function renderFull(){
   const r=getRecipe();if(!r){render();return;}
-  // Group steps by phase
+  const rid=r.id;
+  const fromGuided=state._fullFrom==='guided';
+  const backFn=fromGuided?'goFullBack()':'go(\'detail\',{id:'+rid+'})';
+
+  // Group steps by phase, add global index
   const groups=[];
   (r.steps||[]).forEach((s,i)=>{
     const last=groups[groups.length-1];
-    if(last&&last.phase===s.phase){last.steps.push({...s,idx:i});}
-    else{groups.push({phase:s.phase,steps:[{...s,idx:i}]});}
+    if(last&&last.phase===s.phase){last.steps.push({s,i});}
+    else{groups.push({phase:s.phase,steps:[{s,i}]});}
   });
-  const stepsHTML=groups.map(g=>{
+
+  // Build steps HTML
+  let stepsHTML='';
+  groups.forEach(g=>{
     const color=pc(g.phase);
-    return`<div class="full-phase-hdr"><span class="full-phase-dot" style="background:${color}"></span><span style="color:${color}">${escH(g.phase)}</span></div>
-    ${g.steps.map(s=>`<div class="full-step">
-      <div class="full-step-hdr">
-        <div class="full-step-num" style="background:${color}20;color:${color}">${s.idx+1}</div>
-        <div class="full-step-title">${escH(s.title)}</div>
-      </div>
-      <div class="full-step-body">${escH(s.instructions)}</div>
-      ${s.timerMinutes?`<div class="full-step-timer">${I.clock} ${escH(s.timerLabel||'')}</div>`:''}
-    </div>`).join('')}`;
-  }).join('');
-  const ingrHTML=(r.ingredients||[]).map(sec=>`
-    ${(r.ingredients||[]).length>1?`<div class="full-ingr-sec">${escH(sec.section)}</div>`:''}
-    ${(sec.items||[]).map(item=>{const{qty,name}=parseIngredient(item);return`<div class="full-ingr-row"><span>${escH(name||item)}</span><span style="color:var(--text-3)">${escH(qty)}</span></div>`;}).join('')}
-  `).join('');
-  const fromGuided=state._fullFrom==='guided';
+    stepsHTML+=`<div class="full-phase-hdr"><span class="full-phase-dot" style="background:${color}"></span><span style="color:${color}">${escH(g.phase)}</span></div>`;
+    g.steps.forEach(({s,i})=>{
+      const displayTitle=summarizeStepTitle(s.instructions)||s.title||'';
+      const instr=escH(s.instructions).replace(/\n/g,'<br>');
+      const timerRow=s.timerMinutes?`<div class="full-step-timer" style="color:var(--terra)">${escH(s.timerLabel||'')}</div>`:'';
+      stepsHTML+=`<div class="full-step">
+        <div class="full-step-hdr">
+          <div class="full-step-num" style="background:var(--bg-2);color:${color}">${i+1}</div>
+          <div class="full-step-title">${escH(displayTitle)}</div>
+        </div>
+        <div class="full-step-body">${instr}</div>
+        ${timerRow}
+      </div>`;
+    });
+  });
+  if(!stepsHTML)stepsHTML='<div style="color:var(--text-3);padding:12px 0">No steps found.</div>';
+
+  // Build ingredients HTML
+  let ingrHTML='';
+  const secs=r.ingredients||[];
+  const multiSec=secs.length>1;
+  secs.forEach(sec=>{
+    if(multiSec)ingrHTML+=`<div class="full-ingr-sec">${escH(sec.section)}</div>`;
+    (sec.items||[]).forEach(item=>{
+      const{qty,name}=parseIngredient(item);
+      ingrHTML+=`<div class="full-ingr-row"><span>${escH(name||item)}</span><span style="color:var(--text-3)">${escH(qty)}</span></div>`;
+    });
+  });
+
   document.getElementById('app').innerHTML=`
     <div class="shell">
       <div style="position:sticky;top:0;z-index:200;background:rgba(255,255,255,.93);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);">
         <div style="display:flex;align-items:center;padding:max(14px,env(safe-area-inset-top)) 12px 10px;gap:4px">
-          <button class="ibtn" onclick="${fromGuided?`goFullBack()`:`go('detail',{id:${r.id}})`}">${I.back}</button>
+          <button class="ibtn" onclick="${backFn}">${I.back}</button>
           <div style="font-size:1rem;font-weight:700;margin-left:4px">${escH(r.name)}</div>
         </div>
       </div>
       <div style="padding:0 18px 32px">
         ${ingrHTML?`<div style="font-size:1rem;font-weight:800;padding:18px 0 8px">Ingredients</div>${ingrHTML}`:''}
         <div style="font-size:1rem;font-weight:800;padding:22px 0 4px">Steps</div>
-        ${stepsHTML||'<div style="color:var(--text-3);padding:12px 0">No steps added yet.</div>'}
+        ${stepsHTML}
       </div>
       <div style="padding:0 18px 32px">
-        <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${r.id}})">Start cooking</button>
+        <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${rid}})">Start cooking</button>
       </div>
     </div>${bnavHTML()}`;
 }
-function goFullBack(){
-  // Return to guided mode at same step if we came from there
-  state.view='guided';render();
-}
+function goFullBack(){state.view='guided';render();}
 
 // ═══════════════════════════════════════
 //  SHOPPING LIST
