@@ -154,6 +154,29 @@
     }
     .sov-title{font-size:.88rem;font-weight:600;margin-bottom:2px;}
     .sov-timer{font-size:.76rem;color:var(--text-3);}
+    /* full recipe view */
+    .full-phase-hdr{
+      display:flex;align-items:center;gap:8px;
+      padding:18px 0 6px;font-size:.72rem;font-weight:700;
+      text-transform:uppercase;letter-spacing:.6px;
+    }
+    .full-phase-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+    .full-step{
+      padding:14px 0;border-bottom:1px solid var(--border);
+    }
+    .full-step:last-child{border-bottom:none;}
+    .full-step-hdr{display:flex;gap:10px;align-items:flex-start;margin-bottom:6px;}
+    .full-step-num{
+      width:24px;height:24px;border-radius:50%;flex-shrink:0;
+      font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;
+      background:var(--bg-2);color:var(--text-3);
+    }
+    .full-step-title{font-size:.92rem;font-weight:700;line-height:1.3;flex:1;}
+    .full-step-body{font-size:.88rem;line-height:1.7;color:var(--text-2);padding-left:34px;}
+    .full-step-timer{font-size:.76rem;color:var(--terra);font-weight:600;padding-left:34px;margin-top:4px;}
+    .full-ingr-sec{padding:10px 0 2px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);}
+    .full-ingr-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.9rem;}
+    .full-ingr-row:last-child{border-bottom:none;}
     /* CTA row */
     .detail-cta{padding:12px 18px 16px;display:flex;flex-direction:column;gap:10px;}
     /* ── GUIDED ── */
@@ -440,6 +463,7 @@ const I={
   info:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
   arrowR:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
   home:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+  list:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
 };
 
 // ═══════════════════════════════════════
@@ -456,6 +480,29 @@ const PHASES={
 };
 const PHASE_KEYS=Object.keys(PHASES);
 function pc(p){return PHASES[p]||'#78716C';}
+// Summarize an instruction into a short action title
+function summarizeStepTitle(text){
+  if(!text)return'';
+  text=text.replace(/^step\s*\d+[:\.\-]?\s*/i,'').trim();
+  // Find the first imperative cooking verb and build a short phrase around it
+  const verbRx=/\b(add|mix|stir|combine|heat|cook|bake|roast|grill|fry|boil|simmer|sauté|saute|pour|place|put|cover|remove|transfer|fold|whisk|knead|chop|dice|slice|mince|preheat|season|serve|cool|refrigerate|drain|rinse|brush|spread|sprinkle|beat|blend|bring|reduce|toss|coat|marinate|brown|sear|fluff|shred|press|roll|shape|proof|rest|dust|divide|flip|stretch|pinch|seal|score|prepare|use|do|make|turn|repeat|continue|let|allow|set aside|deglaze|rest|incorporate|dimple|slap|fold|rise)\b/i;
+  const m=text.match(verbRx);
+  if(m){
+    // Take from the verb forward, trim at a natural break
+    let phrase=text.slice(m.index);
+    // Cut at "and then", "until it", "so that", secondary clause starters
+    phrase=phrase.replace(/\s+(?:and then|once it|until it|so that|which will|you will|this will|it will|at this point)\b.*/i,'');
+    // Cut at end of first sentence
+    phrase=phrase.split(/[.!?]/)[0];
+    // Trim to 60 chars at word boundary
+    if(phrase.length>60){phrase=phrase.substring(0,57).replace(/\s+\S*$/,'')+'…';}
+    return phrase.trim();
+  }
+  // Fallback: first clause before comma or semicolon, capped at 60
+  let fallback=text.split(/[.!?,;]/)[0].trim();
+  if(fallback.length>60)fallback=fallback.substring(0,57).replace(/\s+\S*$/,'')+'…';
+  return fallback;
+}
 // Map a free-text section name to the nearest known phase (or return title-cased name)
 function mapPhase(name){
   if(!name)return'Prep';
@@ -598,7 +645,7 @@ function saveShopList(){save('k_shoplist',shoppingList);}
 const TIMER_ZERO={remaining:0,total:0,running:false,done:false,_id:null,endTime:null,label:''};
 let state={
   tab:'recipes',         // 'recipes'|'shoplist'|'timers'
-  view:'list',           // 'list'|'detail'|'guided'|'add'|'complete'
+  view:'list',           // 'list'|'detail'|'guided'|'full'|'add'|'complete'
   detailTab:'ingredients',
   shopTab:'aisle',
   addTab:'url',
@@ -888,7 +935,8 @@ function patchTimerTab(){
 // ═══════════════════════════════════════
 function goTab(tab){state.tab=tab;if(tab!=='recipes'&&state.view==='guided')return;state.view='list';render();}
 function go(view,opts={}){
-  stopTimer();state.view=view;state.tab='recipes';
+  if(view!=='full')stopTimer();
+  state.view=view;state.tab='recipes';
   if(opts.id!==undefined)state.activeRecipeId=opts.id;
   if(view==='guided'){state.stepIndex=0;state.timer={...TIMER_ZERO};}
   if(view==='detail')state.detailTab='ingredients';
@@ -986,7 +1034,9 @@ function renderDetail(){
     const items=(r.cookware||[]);
     tabContent=items.length?`<div class="tab-content">${items.map(c=>`<div class="cw-item"><span class="cw-dot"></span>${escH(c)}</div>`).join('')}</div>`:`<div style="padding:16px 18px;color:var(--text-3);font-size:.9rem">No cookware listed.</div>`;
   }else{
-    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(s.title)}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}</div>`;
+    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(s.title)}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}
+    <div style="padding:18px 0 4px"><button class="btn btn-ghost btn-full" onclick="state._fullFrom='detail';go('full',{id:${r.id}})">${I.list} View full recipe</button></div>
+    </div>`;
   }
   document.getElementById('app').innerHTML=`
     <div class="shell">
@@ -1064,8 +1114,9 @@ function renderGuided(){
         ${timerHTML}
       </div>
       <div class="guided-footer">
-        <div class="guided-footer-left">
+        <div class="guided-footer-left" style="display:flex;gap:8px">
           <button class="rbtn rbtn-white" onclick="go('detail',{id:${r.id}})" title="Back to recipe">${I.book}</button>
+          <button class="rbtn rbtn-white" onclick="state._fullFrom='guided';go('full',{id:${r.id}})" title="View full recipe">${I.list}</button>
         </div>
         <button class="rbtn rbtn-white" onclick="goPrev()" ${idx===0?'disabled':''}>${I.back}</button>
         <button class="rbtn rbtn-terra" onclick="goNext()">${idx===total-1?I.check:I.fwd}</button>
@@ -1091,6 +1142,58 @@ function renderComplete(){
         </div>
       </div>
     </div>${bnavHTML()}`;
+}
+
+// ═══════════════════════════════════════
+//  FULL RECIPE VIEW
+// ═══════════════════════════════════════
+function renderFull(){
+  const r=getRecipe();if(!r){render();return;}
+  // Group steps by phase
+  const groups=[];
+  (r.steps||[]).forEach((s,i)=>{
+    const last=groups[groups.length-1];
+    if(last&&last.phase===s.phase){last.steps.push({...s,idx:i});}
+    else{groups.push({phase:s.phase,steps:[{...s,idx:i}]});}
+  });
+  const stepsHTML=groups.map(g=>{
+    const color=pc(g.phase);
+    return`<div class="full-phase-hdr"><span class="full-phase-dot" style="background:${color}"></span><span style="color:${color}">${escH(g.phase)}</span></div>
+    ${g.steps.map(s=>`<div class="full-step">
+      <div class="full-step-hdr">
+        <div class="full-step-num" style="background:${color}20;color:${color}">${s.idx+1}</div>
+        <div class="full-step-title">${escH(s.title)}</div>
+      </div>
+      <div class="full-step-body">${escH(s.instructions)}</div>
+      ${s.timerMinutes?`<div class="full-step-timer">${I.clock} ${escH(s.timerLabel||'')}</div>`:''}
+    </div>`).join('')}`;
+  }).join('');
+  const ingrHTML=(r.ingredients||[]).map(sec=>`
+    ${(r.ingredients||[]).length>1?`<div class="full-ingr-sec">${escH(sec.section)}</div>`:''}
+    ${(sec.items||[]).map(item=>{const{qty,name}=parseIngredient(item);return`<div class="full-ingr-row"><span>${escH(name||item)}</span><span style="color:var(--text-3)">${escH(qty)}</span></div>`;}).join('')}
+  `).join('');
+  const fromGuided=state._fullFrom==='guided';
+  document.getElementById('app').innerHTML=`
+    <div class="shell">
+      <div style="position:sticky;top:0;z-index:200;background:rgba(255,255,255,.93);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);">
+        <div style="display:flex;align-items:center;padding:max(14px,env(safe-area-inset-top)) 12px 10px;gap:4px">
+          <button class="ibtn" onclick="${fromGuided?`goFullBack()`:`go('detail',{id:${r.id}})`}">${I.back}</button>
+          <div style="font-size:1rem;font-weight:700;margin-left:4px">${escH(r.name)}</div>
+        </div>
+      </div>
+      <div style="padding:0 18px 32px">
+        ${ingrHTML?`<div style="font-size:1rem;font-weight:800;padding:18px 0 8px">Ingredients</div>${ingrHTML}`:''}
+        <div style="font-size:1rem;font-weight:800;padding:22px 0 4px">Steps</div>
+        ${stepsHTML||'<div style="color:var(--text-3);padding:12px 0">No steps added yet.</div>'}
+      </div>
+      <div style="padding:0 18px 32px">
+        <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${r.id}})">Start cooking</button>
+      </div>
+    </div>${bnavHTML()}`;
+}
+function goFullBack(){
+  // Return to guided mode at same step if we came from there
+  state.view='guided';render();
 }
 
 // ═══════════════════════════════════════
@@ -1445,7 +1548,7 @@ function parseRecipeText(text){
   const parsedSteps=finalSteps.map(chunk=>{
     const instructions=chunk.replace(/^(?:step\s*\d+[:\.\-]?\s*)/i,'').trim();
     const timerMinutes=detectTimer(instructions);
-    const title=instructions.split(/[.!?]/)[0].substring(0,60);
+    const title=summarizeStepTitle(instructions);
     return{phase:'Prep',title,instructions,timerMinutes,timerLabel:timerMinutes?`${timerMinutes} min`:''};
   });
   return{ingredients,steps:parsedSteps};
@@ -1537,12 +1640,12 @@ function parseJSONLD(json){
       const sectionPhase=mapPhase(stripTags(item.name||''));
       item.itemListElement.forEach(sub=>{
         const s=extractStep(sub);
-        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:sectionPhase,title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
+        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:sectionPhase,title:nm&&nm.length<80&&nm!==t?nm:summarizeStepTitle(t),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
       });
     } else {
       // HowToStep, plain string, or object with text/name
       const s=extractStep(item);
-      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);const ph=mapPhase(nm);steps.push({phase:ph,title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
+      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);const ph=mapPhase(nm);steps.push({phase:ph,title:nm&&nm.length<80&&nm!==t?nm:summarizeStepTitle(t),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
     }
   });
   // Fix timer labels
@@ -1666,34 +1769,43 @@ async function fetchFromURL(){
           const txt=(li.textContent||'').replace(/\s+/g,' ').trim();
           if(txt.length>10){
             const tm=detectTimer(txt);
-            steps.push({phase,title:txt.split(/[.!?]/)[0].substring(0,60),instructions:txt,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});
+            steps.push({phase,title:summarizeStepTitle(txt),instructions:txt,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});
           }
         });
       });
       return steps;
     }
-    // Try to extract ingredients from <ul> lists in the DOM directly
+    // Try to extract ingredients from <ul> lists in the DOM, preserving sections
     function domExtractIngredients(d){
-      // Look for all <ul> lists; ingredient lists tend to be long with short items
-      const uls=[...d.querySelectorAll('ul')].filter(ul=>{
-        const items=ul.querySelectorAll('li');
-        if(items.length<2)return false;
-        // Ingredient items tend to be short (under 120 chars)
-        const avgLen=[...items].reduce((s,li)=>s+(li.textContent||'').trim().length,0)/items.length;
-        return avgLen<120;
-      });
-      if(!uls.length)return[];
-      // Pick the list whose items look most like ingredient strings
       const ingrWordRx=/\b(?:cup|tbsp|tsp|oz|lb|gram|g\b|kg|ml|litre|liter|pinch|clove|bunch|slice|piece|large|medium|small|fresh|dried|chopped|minced|diced|divided|optional|to taste|\d+)\b/i;
-      uls.sort((a,b)=>{
-        const scoreA=[...a.querySelectorAll('li')].filter(li=>ingrWordRx.test(li.textContent||'')).length;
-        const scoreB=[...b.querySelectorAll('li')].filter(li=>ingrWordRx.test(li.textContent||'')).length;
-        return scoreB-scoreA;
+      // Score a <ul> for ingredient-likeness
+      function ingrScore(ul){
+        const lis=[...ul.querySelectorAll('li')];
+        if(lis.length<2)return 0;
+        const avgLen=lis.reduce((s,li)=>s+(li.textContent||'').trim().length,0)/lis.length;
+        if(avgLen>150)return 0; // too long to be ingredients
+        const matches=lis.filter(li=>ingrWordRx.test(li.textContent||'')).length;
+        return matches;
+      }
+      const allUls=[...d.querySelectorAll('ul')].filter(ul=>ingrScore(ul)>0);
+      if(!allUls.length)return[];
+      // Group <ul> lists by their preceding section header
+      const sections=[];
+      allUls.forEach(ul=>{
+        const header=precedingHeader(ul);
+        // Skip if header looks like navigation / unrelated
+        if(header&&/nav|menu|social|share|follow|related|more recipes/i.test(header))return;
+        const items=[...ul.querySelectorAll('li')]
+          .map(li=>(li.textContent||'').replace(/\s+/g,' ').trim())
+          .filter(t=>t.length>2&&t.length<200);
+        if(!items.length)return;
+        // Merge into existing section with same header if adjacent
+        const sec=header||'Ingredients';
+        const last=sections[sections.length-1];
+        if(last&&last.section===sec){last.items.push(...items);}
+        else{sections.push({section:sec,items});}
       });
-      const items=[...uls[0].querySelectorAll('li')]
-        .map(li=>(li.textContent||'').replace(/\s+/g,' ').trim())
-        .filter(t=>t.length>2&&t.length<200);
-      return items;
+      return sections;
     }
     // Permissive text → steps (no cooking-verb filter; used after we've already stripped chrome)
     function textToSteps(txt){
@@ -1704,7 +1816,7 @@ async function fetchFromURL(){
       return chunks.slice(0,40).map(chunk=>{
         const instructions=chunk.replace(/^(?:step\s*\d+[:\.\-]?\s*)/i,'').trim();
         const tm=detectTimer(instructions);
-        return{phase:'Prep',title:instructions.split(/[.!?]/)[0].substring(0,60),instructions,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};
+        return{phase:'Prep',title:summarizeStepTitle(instructions),instructions,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};
       });
     }
 
@@ -1727,7 +1839,7 @@ async function fetchFromURL(){
       if(!parsed.ingredients.length){
         const domIngr=domExtractIngredients(doc);
         if(domIngr.length){
-          parsed.ingredients=[{section:'Ingredients',items:domIngr}];
+          parsed.ingredients=domIngr;
         }else{
           cleanDoc(doc);
           const bodyText=docBodyText(doc);
@@ -1750,7 +1862,7 @@ async function fetchFromURL(){
       if(bodyText.length<200)throw new Error('The page content could not be read. The site may require JavaScript or block automated access. Try copying the recipe text and using Paste Text instead.');
       const fb=parseRecipeText(bodyText);
       const finalSteps=domSteps.length>=fb.steps.length?domSteps:fb.steps;
-      const finalIngr=domIngr.length?[{section:'Ingredients',items:domIngr}]:(fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[]);
+      const finalIngr=domIngr.length?domIngr:(fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[]);
       state.addForm.urlParsed={name:pageTitle,description:metaDesc,image:ogImage,yield:'',difficulty:'Intermediate',cookware:[],ingredients:finalIngr,steps:finalSteps};
       state.addForm.urlStatus=finalSteps.length?'partial':'error';
       state.addForm.urlError=finalSteps.length?'No structured recipe found — extracted from page text. Please review the steps carefully.':'No recipe content detected. The site may block automated access. Try copying the text and using Paste Text.';
@@ -1781,6 +1893,7 @@ function deleteRecipe(id){
 function render(){
   if(state.view==='guided'){renderGuided();return;}
   if(state.view==='complete'){renderComplete();return;}
+  if(state.view==='full'){renderFull();return;}
   if(state.view==='detail'){renderDetail();return;}
   if(state.view==='add'){renderAdd();return;}
   if(state.tab==='shoplist'){renderShopList();return;}
