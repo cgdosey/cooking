@@ -1482,7 +1482,6 @@ function parseJSONLD(json){
   const rawIngr=Array.isArray(json.recipeIngredient)?json.recipeIngredient:[];
   const ingredients=rawIngr.length?[{section:'Ingredients',items:rawIngr}]:[];
   // Steps
-  const rawInstr=json.recipeInstructions||[];
   // Helper: strip HTML tags from instruction text
   function stripTags(s){return(s||'').replace(/<[^>]+>/g,' ').replace(/\s{2,}/g,' ').trim();}
   // Helper: extract a single step item (HowToStep or plain)
