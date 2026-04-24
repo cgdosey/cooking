@@ -1034,7 +1034,7 @@ function renderDetail(){
     const items=(r.cookware||[]);
     tabContent=items.length?`<div class="tab-content">${items.map(c=>`<div class="cw-item"><span class="cw-dot"></span>${escH(c)}</div>`).join('')}</div>`:`<div style="padding:16px 18px;color:var(--text-3);font-size:.9rem">No cookware listed.</div>`;
   }else{
-    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(summarizeStepTitle(s.instructions)||s.title)}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}
+    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(s.phase||'Step')} ${i+1}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}
     <div style="padding:18px 0 4px"><button class="btn btn-ghost btn-full" onclick="state._fullFrom='detail';go('full',{id:${r.id}})">${I.list} View full recipe</button></div>
     </div>`;
   }
@@ -1107,7 +1107,6 @@ function renderGuided(){
           <span class="guided-phase-dot" style="background:${color}"></span>
           <span style="color:${color}">${escH(step.phase)}</span>
         </div>
-        <div class="guided-title">${escH(summarizeStepTitle(step.instructions)||step.title)}</div>
         <div class="guided-instructions">${escH(step.instructions)}</div>
         ${step.tip?`<div class="guided-tip"><div class="guided-tip-label">Tip</div>${escH(step.tip)}</div>`:''}
         ${stepImg}
@@ -1167,7 +1166,7 @@ function renderFull(){
     const color=pc(g.phase);
     stepsHTML+=`<div class="full-phase-hdr"><span class="full-phase-dot" style="background:${color}"></span><span style="color:${color}">${escH(g.phase)}</span></div>`;
     g.steps.forEach(({s,i})=>{
-      const displayTitle=summarizeStepTitle(s.instructions)||s.title||'';
+      const displayTitle='Step '+(i+1);
       const instr=escH(s.instructions).replace(/\n/g,'<br>');
       const timerRow=s.timerMinutes?`<div class="full-step-timer" style="color:var(--terra)">${escH(s.timerLabel||'')}</div>`:'';
       stepsHTML+=`<div class="full-step">
