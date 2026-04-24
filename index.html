@@ -1034,9 +1034,31 @@ function renderDetail(){
     const items=(r.cookware||[]);
     tabContent=items.length?`<div class="tab-content">${items.map(c=>`<div class="cw-item"><span class="cw-dot"></span>${escH(c)}</div>`).join('')}</div>`:`<div style="padding:16px 18px;color:var(--text-3);font-size:.9rem">No cookware listed.</div>`;
   }else{
-    tabContent=`<div class="tab-content">${(r.steps||[]).map((s,i)=>`<div class="sov-row"><div class="sov-num">${i+1}</div><div><div class="sov-title">${escH(s.phase||'Step')} ${i+1}</div>${s.timerMinutes?`<div class="sov-timer">${escH(s.timerLabel||'')} — ${fmtTime(s.timerMinutes*60)}</div>`:''}</div></div>`).join('')}
-    <div style="padding:18px 0 4px"><button class="btn btn-ghost btn-full" onclick="state._fullFrom='detail';go('full',{id:${r.id}})">${I.list} View full recipe</button></div>
-    </div>`;
+    // Group steps by phase and write out in full
+    const groups=[];
+    (r.steps||[]).forEach((s,i)=>{
+      const last=groups[groups.length-1];
+      if(last&&last.phase===s.phase){last.steps.push({s,i});}
+      else{groups.push({phase:s.phase,steps:[{s,i}]});}
+    });
+    let stepsBody='';
+    groups.forEach(g=>{
+      const color=pc(g.phase);
+      stepsBody+=`<div class="full-phase-hdr"><span class="full-phase-dot" style="background:${color}"></span><span style="color:${color}">${escH(g.phase)}</span></div>`;
+      g.steps.forEach(({s,i})=>{
+        const instr=escH(s.instructions).replace(/\n/g,'<br>');
+        const timerRow=s.timerMinutes?`<div class="full-step-timer" style="color:var(--terra)">${escH(s.timerLabel||'')}</div>`:'';
+        stepsBody+=`<div class="full-step">
+          <div class="full-step-hdr">
+            <div class="full-step-num" style="background:var(--bg-2);color:${color}">${i+1}</div>
+            <div class="full-step-title">Step ${i+1}</div>
+          </div>
+          <div class="full-step-body">${instr}</div>
+          ${timerRow}
+        </div>`;
+      });
+    });
+    tabContent=`<div class="tab-content">${stepsBody||'<div style="color:var(--text-3);padding:12px 0">No steps listed.</div>'}</div>`;
   }
   document.getElementById('app').innerHTML=`
     <div class="shell">
@@ -1113,9 +1135,8 @@ function renderGuided(){
         ${timerHTML}
       </div>
       <div class="guided-footer">
-        <div class="guided-footer-left" style="display:flex;gap:8px">
+        <div class="guided-footer-left">
           <button class="rbtn rbtn-white" onclick="go('detail',{id:${r.id}})" title="Back to recipe">${I.book}</button>
-          <button class="rbtn rbtn-white" onclick="state._fullFrom='guided';go('full',{id:${r.id}})" title="View full recipe">${I.list}</button>
         </div>
         <button class="rbtn rbtn-white" onclick="goPrev()" ${idx===0?'disabled':''}>${I.back}</button>
         <button class="rbtn rbtn-terra" onclick="goNext()">${idx===total-1?I.check:I.fwd}</button>
