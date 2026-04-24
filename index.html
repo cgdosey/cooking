@@ -1336,13 +1336,19 @@ function cleanWebJunk(text){
   }).join('\n');
 }
 
-// Does a line look like an actual cooking step?
+// Does a line look like an actual cooking step or ingredient?
+// Used to filter pasted website chrome — intentionally permissive to avoid dropping real steps
 function looksLikeCookingStep(s){
-  if(s.length<20)return false;
-  // Must contain cooking-related words OR quantities
-  const cookWords=/\b(?:add|mix|stir|combine|heat|cook|bake|roast|grill|fry|boil|simmer|sauté|saute|pour|place|put|set|cover|remove|transfer|fold|whisk|knead|chop|dice|slice|mince|preheat|season|taste|serve|let|allow|rest|cool|refrigerate|drain|rinse|pat|brush|spread|arrange|sprinkle|squeeze|beat|blend|process|prepare|bring|reduce|until|meanwhile|once|then|when|next)\b/i;
-  const hasQty=/\d+\s*(?:g|kg|ml|l|cup|tbsp|tsp|oz|lb|°|min|hour|hr)/i;
-  return cookWords.test(s)||hasQty.test(s);
+  if(s.length<15)return false;
+  // Hard reject: clearly website junk
+  if(/^(?:sign up|subscribe|newsletter|get notified|follow|share|print|save recipe|jump|advertisement|sponsored|related|more recipes|you may also|back to top|home\s*[>»])/i.test(s.trim()))return false;
+  // Accept if it has a quantity or measurement
+  if(/\d+\s*(?:g|kg|ml|l|cup|tbsp|tsp|oz|lb|°[CF]|min|hour|hr|clove|bunch|slice|pinch)/i.test(s))return true;
+  // Accept if it contains common cooking verbs
+  if(/\b(?:add|mix|stir|combine|heat|cook|bake|roast|grill|fry|boil|simmer|sauté|saute|pour|place|put|cover|remove|transfer|fold|whisk|knead|chop|dice|slice|mince|preheat|season|serve|cool|refrigerate|drain|rinse|brush|spread|sprinkle|beat|blend|bring|reduce|toss|coat|marinate|brown|sear|deglaze|fluff|shred|press|roll|shape|rise|proof|rest|allow|let stand|set aside)\b/i.test(s))return true;
+  // Accept longer lines that start with a capital — likely a sentence, probably a step
+  if(s.length>60&&/^[A-Z]/.test(s.trim()))return true;
+  return false;
 }
 
 function parseRecipeText(text){
@@ -1477,24 +1483,30 @@ function parseJSONLD(json){
   const ingredients=rawIngr.length?[{section:'Ingredients',items:rawIngr}]:[];
   // Steps
   const rawInstr=json.recipeInstructions||[];
+  // Helper: strip HTML tags from instruction text
+  function stripTags(s){return(s||'').replace(/<[^>]+>/g,' ').replace(/\s{2,}/g,' ').trim();}
+  // Helper: extract a single step item (HowToStep or plain)
+  function extractStep(item){
+    if(!item)return null;
+    if(typeof item==='string'){const t=stripTags(item);return t.length>5?t:null;}
+    const t=stripTags(item.text||item.name||item['@value']||'');
+    return t.length>5?{text:t,name:stripTags(item.name||''),img:typeof item.image==='string'?item.image:(item.image?.url||''),time:parseDuration(item.timeRequired)||null}:null;
+  }
+  // Try standard recipeInstructions, then fall back to non-standard fields
+  const rawInstr=json.recipeInstructions||json.instructions||json.steps||[];
   const flatInstr=Array.isArray(rawInstr)?rawInstr:[rawInstr];
   const steps=[];
   flatInstr.forEach(item=>{
-    if(item['@type']==='HowToSection'&&Array.isArray(item.itemListElement)){
+    // HowToSection — iterate itemListElement
+    if(item&&(item['@type']==='HowToSection'||item['@type']==='ItemList')&&Array.isArray(item.itemListElement)){
       item.itemListElement.forEach(sub=>{
-        const txt=sub.text||sub.name||'';
-        if(txt.trim()){
-          let img='';if(sub.image){img=typeof sub.image==='string'?sub.image:sub.image?.url||'';}
-          steps.push({phase:'Prep',title:(sub.name||txt.split(/[.!?]/)[0]).substring(0,60),instructions:txt,image:img,timerMinutes:parseDuration(sub.timeRequired)||detectTimer(txt),timerLabel:''});
-        }
+        const s=extractStep(sub);
+        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:'Prep',title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
       });
-    }else{
-      const txt=typeof item==='string'?item:(item.text||item.name||'');
-      if(txt.trim()){
-        let img='';if(item.image){img=typeof item.image==='string'?item.image:item.image?.url||'';}
-        const tm=parseDuration(item.timeRequired)||detectTimer(txt);
-        steps.push({phase:'Prep',title:(typeof item!=='string'&&item.name?item.name:txt.split(/[.!?]/)[0]).substring(0,60),instructions:txt,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});
-      }
+    } else {
+      // HowToStep, plain string, or object with text/name
+      const s=extractStep(item);
+      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:'Prep',title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
     }
   });
   // Fix timer labels
@@ -1559,44 +1571,83 @@ async function fetchFromURL(){
     for(const script of doc.querySelectorAll('script[type="application/ld+json"]')){
       try{node=findRecipeNode(JSON.parse(script.textContent));if(node)break;}catch(e){}
     }
-    // Helper: extract clean text from parsed doc (innerText is layout-dependent in DOMParser)
-    function docBodyText(d){
-      const body=d.body;
-      if(!body)return'';
-      // Remove noisy elements before extracting text
+    // Remove chrome elements from doc for clean text extraction
+    function cleanDoc(d){
       ['script','style','nav','footer','header','aside','[role="navigation"]','[role="banner"]',
        '.nav','.menu','.sidebar','.footer','.header','.ad','.advertisement','.popup','.modal',
        '.newsletter','.subscribe','.social','noscript','iframe'].forEach(sel=>{
-        try{body.querySelectorAll(sel).forEach(el=>el.remove());}catch(e){}
+        try{d.body?.querySelectorAll(sel).forEach(el=>el.remove());}catch(e){}
       });
-      // textContent preserves all text; replace runs of whitespace with single newlines
-      return(body.textContent||'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
     }
+    // Extract clean body text (textContent, not innerText, works in DOMParser context)
+    function docBodyText(d){
+      return(d.body?.textContent||'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    }
+    // Try to extract steps from <ol> lists in the DOM directly
+    function domExtractSteps(d){
+      const steps=[];
+      // Look for ordered lists with multiple items
+      const ols=[...d.querySelectorAll('ol')].filter(ol=>ol.querySelectorAll('li').length>=2);
+      // Pick the longest <ol> (most likely the instructions)
+      ols.sort((a,b)=>b.querySelectorAll('li').length-a.querySelectorAll('li').length);
+      if(ols[0]){
+        ols[0].querySelectorAll('li').forEach(li=>{
+          const txt=(li.textContent||'').replace(/\s+/g,' ').trim();
+          if(txt.length>15){
+            const tm=detectTimer(txt);
+            steps.push({phase:'Prep',title:txt.split(/[.!?]/)[0].substring(0,60),instructions:txt,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});
+          }
+        });
+      }
+      return steps;
+    }
+    // Permissive text → steps (no cooking-verb filter; used after we've already stripped chrome)
+    function textToSteps(txt){
+      let chunks=[];
+      if(/\n\s*\d+[.\)]\s+/.test(txt))chunks=txt.split(/\n\s*\d+[.\)]\s+/).filter(s=>s.length>15);
+      if(chunks.length<2)chunks=txt.split(/\n{2,}/).filter(s=>s.length>20);
+      if(chunks.length<2)chunks=txt.split(/\n/).filter(s=>s.length>40&&/^[A-Z0-9]/.test(s));
+      return chunks.slice(0,40).map(chunk=>{
+        const instructions=chunk.replace(/^(?:step\s*\d+[:\.\-]?\s*)/i,'').trim();
+        const tm=detectTimer(instructions);
+        return{phase:'Prep',title:instructions.split(/[.!?]/)[0].substring(0,60),instructions,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};
+      });
+    }
+
     if(node){
       const parsed=parseJSONLD(node);
-      if(!parsed.steps.length&&!parsed.ingredients.length){
-        // Found node but empty — try text fallback
-        const bodyText=docBodyText(doc);
-        const fb=parseRecipeText(bodyText);
-        parsed.steps=fb.steps;
-        if(!parsed.ingredients.length&&fb.ingredients.length)parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
+      // Fallback if steps missing: try DOM <ol> extraction, then text parsing
+      if(!parsed.steps.length){
+        let fallbackSteps=domExtractSteps(doc);
+        if(!fallbackSteps.length){
+          cleanDoc(doc);
+          const bodyText=docBodyText(doc);
+          const fb=parseRecipeText(bodyText);
+          fallbackSteps=fb.steps;
+          if(!parsed.ingredients.length&&fb.ingredients.length)
+            parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
+        }
+        parsed.steps=fallbackSteps;
         state.addForm.urlStatus=parsed.steps.length?'success':'partial';
-        state.addForm.urlError=parsed.steps.length?'':'Recipe found but steps could not be extracted. Try Paste Text.';
+        state.addForm.urlError=parsed.steps.length?'':'Recipe info found but steps could not be extracted. Try Paste Text.';
       }else{
         state.addForm.urlStatus='success';
       }
       state.addForm.urlParsed=parsed;
     }else{
-      // No JSON-LD — fall back to text parsing of cleaned body
+      // No JSON-LD — try DOM extraction first, then text parsing
+      const domSteps=domExtractSteps(doc);
+      cleanDoc(doc);
       const bodyText=docBodyText(doc);
       const pageTitle=doc.querySelector('title')?.textContent?.replace(/\s*[-|–].*$/,'').trim()||'';
       const metaDesc=doc.querySelector('meta[name="description"]')?.content||doc.querySelector('meta[property="og:description"]')?.content||'';
       const ogImage=doc.querySelector('meta[property="og:image"]')?.content||'';
-      if(bodyText.length<200)throw new Error('The page content could not be read. The site may require JavaScript or block automated access. Try copying the text and using Paste Text instead.');
+      if(bodyText.length<200)throw new Error('The page content could not be read. The site may require JavaScript or block automated access. Try copying the recipe text and using Paste Text instead.');
       const fb=parseRecipeText(bodyText);
-      state.addForm.urlParsed={name:pageTitle,description:metaDesc,image:ogImage,yield:'',difficulty:'Intermediate',cookware:[],ingredients:fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[],steps:fb.steps};
-      state.addForm.urlStatus=fb.steps.length?'partial':'error';
-      state.addForm.urlError=fb.steps.length?'Recipe data not found on this page — extracted from page text instead. Review steps carefully.':'No recipe content detected. The site may block automated access. Try copying the text and using Paste Text.';
+      const finalSteps=domSteps.length>=fb.steps.length?domSteps:fb.steps;
+      state.addForm.urlParsed={name:pageTitle,description:metaDesc,image:ogImage,yield:'',difficulty:'Intermediate',cookware:[],ingredients:fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[],steps:finalSteps};
+      state.addForm.urlStatus=finalSteps.length?'partial':'error';
+      state.addForm.urlError=finalSteps.length?'No structured recipe found — extracted from page text. Please review the steps carefully.':'No recipe content detected. The site may block automated access. Try copying the text and using Paste Text.';
     }
   }catch(err){
     state.addForm.urlStatus='error';
