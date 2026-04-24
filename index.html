@@ -456,6 +456,37 @@ const PHASES={
 };
 const PHASE_KEYS=Object.keys(PHASES);
 function pc(p){return PHASES[p]||'#78716C';}
+// Map a free-text section name to the nearest known phase (or return title-cased name)
+function mapPhase(name){
+  if(!name)return'Prep';
+  const n=name.trim();
+  // Exact match first
+  for(const k of PHASE_KEYS){if(k.toLowerCase()===n.toLowerCase())return k;}
+  // Substring match
+  const nl=n.toLowerCase();
+  for(const k of PHASE_KEYS){if(nl.includes(k.toLowerCase())||k.toLowerCase().includes(nl))return k;}
+  // Keyword heuristics
+  if(/levain|starter|leaven/i.test(n))return'Levain';
+  if(/autolyse|autolyze/i.test(n))return'Autolyse';
+  if(/bulk|ferment/i.test(n))return'Bulk Fermentation';
+  if(/shap/i.test(n))return'Shaping';
+  if(/proof|retard|refrigerat/i.test(n))return'Proofing';
+  if(/bak/i.test(n))return'Baking';
+  if(/roast/i.test(n))return'Roasting';
+  if(/grill/i.test(n))return'Grilling';
+  if(/fry|frying/i.test(n))return'Frying';
+  if(/simmer/i.test(n))return'Simmering';
+  if(/marinate|marinating/i.test(n))return'Marinating';
+  if(/assembl/i.test(n))return'Assembly';
+  if(/finish|garnish/i.test(n))return'Finishing';
+  if(/cool|rest|stand/i.test(n))return'Resting';
+  if(/mix|combin/i.test(n))return'Mixing';
+  if(/sauté|saute|soften/i.test(n))return'Sautéing';
+  if(/steam/i.test(n))return'Steaming';
+  if(/prep|mise/i.test(n))return'Prep';
+  // Unknown section — return cleaned title so it still shows meaningfully
+  return n.replace(/[:\-–]+$/,'').trim()||'Prep';
+}
 
 // ═══════════════════════════════════════
 //  SOURDOUGH DATA
@@ -1501,16 +1532,17 @@ function parseJSONLD(json){
   const flatInstr=Array.isArray(rawInstr)?rawInstr:[rawInstr];
   const steps=[];
   flatInstr.forEach(item=>{
-    // HowToSection — iterate itemListElement
+    // HowToSection — iterate itemListElement, use section name as phase
     if(item&&(item['@type']==='HowToSection'||item['@type']==='ItemList')&&Array.isArray(item.itemListElement)){
+      const sectionPhase=mapPhase(stripTags(item.name||''));
       item.itemListElement.forEach(sub=>{
         const s=extractStep(sub);
-        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:'Prep',title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
+        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:sectionPhase,title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
       });
     } else {
       // HowToStep, plain string, or object with text/name
       const s=extractStep(item);
-      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:'Prep',title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
+      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);const ph=mapPhase(nm);steps.push({phase:ph,title:(nm||t.split(/[.!?]/)[0]).substring(0,60),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
     }
   });
   // Fix timer labels
@@ -1587,20 +1619,57 @@ async function fetchFromURL(){
     function docBodyText(d){
       return(d.body?.textContent||'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
     }
-    // Try to extract steps from <ol> lists in the DOM directly
+    // Find the nearest preceding heading/label for an element
+    function precedingHeader(el){
+      // Walk previous siblings and parent's previous siblings
+      let cur=el.previousElementSibling;
+      let depth=0;
+      while(cur&&depth<5){
+        const tag=cur.tagName||'';
+        if(/^H[1-6]$/i.test(tag)||tag==='STRONG'||tag==='B'){
+          const t=(cur.textContent||'').replace(/\s+/g,' ').trim();
+          if(t.length>1&&t.length<80)return t;
+        }
+        // Also check if the sibling itself contains a heading as first child
+        const inner=cur.querySelector('h1,h2,h3,h4,h5,h6,strong');
+        if(inner){const t=(inner.textContent||'').trim();if(t.length>1&&t.length<80)return t;}
+        cur=cur.previousElementSibling;
+        depth++;
+      }
+      // Try parent element's preceding siblings
+      if(el.parentElement){
+        let par=el.parentElement.previousElementSibling;
+        let pd=0;
+        while(par&&pd<3){
+          const tag=par.tagName||'';
+          if(/^H[1-6]$/i.test(tag)||tag==='STRONG'||tag==='B'){
+            const t=(par.textContent||'').replace(/\s+/g,' ').trim();
+            if(t.length>1&&t.length<80)return t;
+          }
+          const inner=par.querySelector('h1,h2,h3,h4,h5,h6,strong');
+          if(inner){const t=(inner.textContent||'').trim();if(t.length>1&&t.length<80)return t;}
+          par=par.previousElementSibling;pd++;
+        }
+      }
+      return'';
+    }
+    // Try to extract steps from ALL <ol> lists in the DOM, preserving section headers as phases
     function domExtractSteps(d){
       const steps=[];
-      const ols=[...d.querySelectorAll('ol')].filter(ol=>ol.querySelectorAll('li').length>=2);
-      ols.sort((a,b)=>b.querySelectorAll('li').length-a.querySelectorAll('li').length);
-      if(ols[0]){
-        ols[0].querySelectorAll('li').forEach(li=>{
+      const ols=[...d.querySelectorAll('ol')].filter(ol=>ol.querySelectorAll('li').length>=1);
+      if(!ols.length)return steps;
+      // If only one <ol>, just use it with Prep phase
+      ols.forEach(ol=>{
+        const header=precedingHeader(ol);
+        const phase=header?mapPhase(header):'Prep';
+        ol.querySelectorAll('li').forEach(li=>{
           const txt=(li.textContent||'').replace(/\s+/g,' ').trim();
-          if(txt.length>15){
+          if(txt.length>10){
             const tm=detectTimer(txt);
-            steps.push({phase:'Prep',title:txt.split(/[.!?]/)[0].substring(0,60),instructions:txt,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});
+            steps.push({phase,title:txt.split(/[.!?]/)[0].substring(0,60),instructions:txt,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});
           }
         });
-      }
+      });
       return steps;
     }
     // Try to extract ingredients from <ul> lists in the DOM directly
