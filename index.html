@@ -1320,15 +1320,45 @@ function parseRecipe(){
   state.addForm.parsedSteps=result.steps;
   renderAdd();
 }
+// Remove website chrome, navigation, ads, and social junk from pasted text
+function cleanWebJunk(text){
+  const junkLine=/^\s*(?:sign\s*up|subscribe|newsletter|get notified|notify me|follow us|share this|print recipe|save recipe|jump to recipe|jump to card|rate this|leave a comment|leave a review|you may also like|related recipes?|more recipes?|popular recipes?|advertisement|sponsored|disclosure|skip to|back to top|home\s*[>»\/]|pinterest|facebook|twitter|instagram|youtube|tiktok|©|copyright|\d+\s+(?:comments?|reviews?|ratings?|shares?)|calories?:?\s*\d|prep time|cook time|total time|servings?:?\s*\d|course:|cuisine:|keyword:|author:)\s*$/i;
+  const urlLine=/https?:\/\/\S+|www\.\S+/;
+  const navCrumb=/^[\w\s]+(?:\s*[>»\/|]\s*[\w\s]+){2,}$/; // breadcrumbs like Home > Recipes > Bread
+  return text.split('\n').filter(line=>{
+    const l=line.trim();
+    if(!l)return true; // keep blanks for structure
+    if(l.length<3)return false;
+    if(junkLine.test(l))return false;
+    if(urlLine.test(l))return false;
+    if(navCrumb.test(l)&&l.length<80)return false;
+    return true;
+  }).join('\n');
+}
+
+// Does a line look like an actual cooking step?
+function looksLikeCookingStep(s){
+  if(s.length<20)return false;
+  // Must contain cooking-related words OR quantities
+  const cookWords=/\b(?:add|mix|stir|combine|heat|cook|bake|roast|grill|fry|boil|simmer|sauté|saute|pour|place|put|set|cover|remove|transfer|fold|whisk|knead|chop|dice|slice|mince|preheat|season|taste|serve|let|allow|rest|cool|refrigerate|drain|rinse|pat|brush|spread|arrange|sprinkle|squeeze|beat|blend|process|prepare|bring|reduce|until|meanwhile|once|then|when|next)\b/i;
+  const hasQty=/\d+\s*(?:g|kg|ml|l|cup|tbsp|tsp|oz|lb|°|min|hour|hr)/i;
+  return cookWords.test(s)||hasQty.test(s);
+}
+
 function parseRecipeText(text){
+  // Step 1: strip website junk
+  text=cleanWebJunk(text);
+
   // Detect ingredient & instruction sections
   const ingrRx=/^(?:ingredients?|what you'?ll? need|shopping list)[:\s]*/im;
-  const stepsRx=/^(?:instructions?|directions?|method|steps?|how to make|preparation|procedure)[:\s]*/im;
-  const notesRx=/^(?:notes?|tips?|nutrition|storage|serving)[:\s]*/im;
+  const stepsRx=/^(?:instructions?|directions?|method|steps?|how to make|preparation|procedure|for the|to make)[:\s]*/im;
+  const notesRx=/^(?:notes?|tips?|nutrition(?:al)?(?: info(?:rmation)?)?|storage|serving suggestions?|make ahead|equipment|video)[:\s]*/im;
 
   const ingrIdx=text.search(ingrRx);
   const stepsIdx=text.search(stepsRx);
-  const notesIdx=text.search(notesRx);
+  // Find first notes/end section that comes after steps
+  const allNoteMatches=[...text.matchAll(new RegExp(notesRx.source,'gim'))];
+  const notesIdx=allNoteMatches.find(m=>m.index>stepsIdx)?.index??-1;
 
   let ingrText='', stepsText='';
 
@@ -1339,29 +1369,43 @@ function parseRecipeText(text){
     stepsText=text.slice(stepsIdx,notesIdx>stepsIdx?notesIdx:undefined);
     ingrText=text.slice(0,stepsIdx);
   }else{
+    // No clear sections — try to split on first cooking verb paragraph
     stepsText=text;
   }
 
-  // Parse ingredients
+  // Parse ingredients — filter lines that look like ingredient quantities/names
+  const ingrLineRx=/^(?:\d[\d\/\s¼½¾⅓⅔⅛]*\s*(?:g|kg|ml|l|cup|tbsp|tsp|oz|lb|large|medium|small|clove|bunch|slice|piece|pinch|dash|handful|can|package|pkg|stick)?\s+.{3,}|[-•*·✓✔▪▸→]\s*.{3,}|[A-Z].{5,})/;
   const ingredients=ingrText.split('\n')
     .map(l=>l.replace(ingrRx,'').replace(/^[-•*·✓✔▪▸→]\s*/,'').trim())
-    .filter(l=>l.length>2&&!/^(?:ingredients?|directions?|instructions?):?$/i.test(l)&&!/^\d+\s+\w.{20,}/.test(l));
+    .filter(l=>{
+      if(l.length<3)return false;
+      if(/^(?:ingredients?|directions?|instructions?|for the \w+):?$/i.test(l))return false;
+      // Reject lines that look like navigation/website junk
+      if(/sign up|subscribe|newsletter|©|http/i.test(l))return false;
+      // Accept if it has a quantity or looks like an ingredient name
+      return true;
+    })
+    .filter(l=>l.length>2);
 
-  // Parse steps
-  let steps=[];
-  // Try numbered list
-  const numChunks=stepsText.split(/\n\s*\d+[.\)]\s+/).map(s=>s.replace(stepsRx,'').trim()).filter(s=>s.length>15);
-  if(numChunks.length>=2){
-    steps=numChunks;
-  }else{
-    // Try paragraph breaks
-    steps=stepsText.split(/\n{2,}/).map(s=>s.replace(stepsRx,'').trim()).filter(s=>s.length>20);
-    // If still nothing, try single newlines that start with capital
-    if(steps.length<2){
-      steps=stepsText.split(/\n/).map(s=>s.trim()).filter(s=>s.length>30&&/^[A-Z]/.test(s));
-    }
+  // Parse steps — numbered list first, then paragraphs, then capital sentences
+  let rawSteps=[];
+  const numberedRx=/\n\s*\d+[.\)]\s+/;
+  if(numberedRx.test(stepsText)){
+    rawSteps=stepsText.split(numberedRx).map(s=>s.replace(stepsRx,'').trim()).filter(s=>s.length>15);
   }
-  const parsedSteps=steps.map((chunk,i)=>{
+  if(rawSteps.length<2){
+    rawSteps=stepsText.split(/\n{2,}/).map(s=>s.replace(stepsRx,'').trim()).filter(s=>s.length>20);
+  }
+  if(rawSteps.length<2){
+    rawSteps=stepsText.split(/\n/).map(s=>s.trim()).filter(s=>s.length>30&&/^[A-Z0-9]/.test(s));
+  }
+
+  // Filter steps: must look like actual cooking instructions
+  const validSteps=rawSteps.filter(s=>looksLikeCookingStep(s));
+  // If filter removes everything, fall back to all steps (better than nothing)
+  const finalSteps=(validSteps.length>=1?validSteps:rawSteps).slice(0,40);
+
+  const parsedSteps=finalSteps.map(chunk=>{
     const instructions=chunk.replace(/^(?:step\s*\d+[:\.\-]?\s*)/i,'').trim();
     const timerMinutes=detectTimer(instructions);
     const title=instructions.split(/[.!?]/)[0].substring(0,60);
@@ -1460,19 +1504,38 @@ function parseJSONLD(json){
 
 // Multiple proxy strategies
 async function tryFetch(url){
+  const enc=encodeURIComponent(url);
   const proxies=[
+    // allorigins — returns JSON with {contents}
     async()=>{
-      const r=await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,{signal:AbortSignal.timeout(10000)});
+      const r=await fetch(`https://api.allorigins.win/get?url=${enc}`,{signal:AbortSignal.timeout(12000)});
       if(!r.ok)throw new Error(`allorigins ${r.status}`);
       const d=await r.json();
-      if(!d.contents||d.contents.length<500)throw new Error('Empty response');
+      if(!d.contents||d.contents.length<300)throw new Error('Empty allorigins response');
       return d.contents;
     },
+    // codetabs — returns raw HTML
     async()=>{
-      const r=await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`,{signal:AbortSignal.timeout(10000)});
+      const r=await fetch(`https://api.codetabs.com/v1/proxy/?quest=${enc}`,{signal:AbortSignal.timeout(12000)});
+      if(!r.ok)throw new Error(`codetabs ${r.status}`);
+      const t=await r.text();
+      if(t.length<300||t.includes('"Error"'))throw new Error('Empty codetabs response');
+      return t;
+    },
+    // corsproxy.io — returns raw HTML
+    async()=>{
+      const r=await fetch(`https://corsproxy.io/?${enc}`,{signal:AbortSignal.timeout(12000)});
       if(!r.ok)throw new Error(`corsproxy ${r.status}`);
       const t=await r.text();
-      if(t.length<500)throw new Error('Empty response');
+      if(t.length<300)throw new Error('Empty corsproxy response');
+      return t;
+    },
+    // thingproxy — returns raw HTML
+    async()=>{
+      const r=await fetch(`https://thingproxy.freeboard.io/fetch/${url}`,{signal:AbortSignal.timeout(12000)});
+      if(!r.ok)throw new Error(`thingproxy ${r.status}`);
+      const t=await r.text();
+      if(t.length<300)throw new Error('Empty thingproxy response');
       return t;
     },
   ];
@@ -1496,11 +1559,24 @@ async function fetchFromURL(){
     for(const script of doc.querySelectorAll('script[type="application/ld+json"]')){
       try{node=findRecipeNode(JSON.parse(script.textContent));if(node)break;}catch(e){}
     }
+    // Helper: extract clean text from parsed doc (innerText is layout-dependent in DOMParser)
+    function docBodyText(d){
+      const body=d.body;
+      if(!body)return'';
+      // Remove noisy elements before extracting text
+      ['script','style','nav','footer','header','aside','[role="navigation"]','[role="banner"]',
+       '.nav','.menu','.sidebar','.footer','.header','.ad','.advertisement','.popup','.modal',
+       '.newsletter','.subscribe','.social','noscript','iframe'].forEach(sel=>{
+        try{body.querySelectorAll(sel).forEach(el=>el.remove());}catch(e){}
+      });
+      // textContent preserves all text; replace runs of whitespace with single newlines
+      return(body.textContent||'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    }
     if(node){
       const parsed=parseJSONLD(node);
       if(!parsed.steps.length&&!parsed.ingredients.length){
         // Found node but empty — try text fallback
-        const bodyText=doc.body?.innerText||'';
+        const bodyText=docBodyText(doc);
         const fb=parseRecipeText(bodyText);
         parsed.steps=fb.steps;
         if(!parsed.ingredients.length&&fb.ingredients.length)parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
@@ -1511,8 +1587,8 @@ async function fetchFromURL(){
       }
       state.addForm.urlParsed=parsed;
     }else{
-      // No JSON-LD — fall back to text parsing
-      const bodyText=(doc.body?.innerText||'').replace(/\s{3,}/g,'\n\n');
+      // No JSON-LD — fall back to text parsing of cleaned body
+      const bodyText=docBodyText(doc);
       const pageTitle=doc.querySelector('title')?.textContent?.replace(/\s*[-|–].*$/,'').trim()||'';
       const metaDesc=doc.querySelector('meta[name="description"]')?.content||doc.querySelector('meta[property="og:description"]')?.content||'';
       const ogImage=doc.querySelector('meta[property="og:image"]')?.content||'';
