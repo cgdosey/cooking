@@ -131,8 +131,8 @@
       padding:11px 0;border-bottom:1px solid var(--border);
     }
     .ingr-row:last-child{border-bottom:none;}
-    .ingr-name{font-size:.9rem;color:var(--text-2);}
-    .ingr-qty{font-size:.85rem;font-weight:600;color:var(--text);}
+    .ingr-name{font-size:.9rem;color:var(--text-2);flex:1;}
+    .ingr-qty{display:none;}
     /* cookware */
     .cw-item{
       display:flex;align-items:center;gap:12px;
@@ -1027,7 +1027,7 @@ function renderDetail(){
   if(state.detailTab==='ingredients'){
     const rows=(r.ingredients||[]).map(sec=>
       `${sec.section&&(r.ingredients||[]).length>1?`<div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);padding:10px 0 4px">${escH(sec.section)}</div>`:''}
-      ${(sec.items||[]).map(item=>{const{qty,name}=parseIngredient(item);return`<div class="ingr-row"><span class="ingr-name">${escH(name||item)}</span><span class="ingr-qty">${escH(qty)}</span></div>`;}).join('')}`
+      ${(sec.items||[]).map(item=>`<div class="ingr-row"><span class="ingr-name">${escH(item)}</span></div>`).join('')}`
     ).join('');
     tabContent=`<div class="tab-content">${rows||'<div style="padding:16px 0;color:var(--text-3);font-size:.9rem">No ingredients listed.</div>'}</div>`;
   }else if(state.detailTab==='cookware'){
@@ -1209,8 +1209,7 @@ function renderFull(){
   secs.forEach(sec=>{
     if(multiSec)ingrHTML+=`<div class="full-ingr-sec">${escH(sec.section)}</div>`;
     (sec.items||[]).forEach(item=>{
-      const{qty,name}=parseIngredient(item);
-      ingrHTML+=`<div class="full-ingr-row"><span>${escH(name||item)}</span><span style="color:var(--text-3)">${escH(qty)}</span></div>`;
+      ingrHTML+=`<div class="full-ingr-row">${escH(item)}</div>`;
     });
   });
 
