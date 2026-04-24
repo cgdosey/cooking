@@ -1478,8 +1478,13 @@ function parseJSONLD(json){
   // Cookware
   const cookware=[];
   if(Array.isArray(json.tool))json.tool.forEach(t=>{if(typeof t==='string')cookware.push(t);else if(t.name)cookware.push(t.name);});
-  // Ingredients
-  const rawIngr=Array.isArray(json.recipeIngredient)?json.recipeIngredient:[];
+  // Ingredients — handle strings, objects with name/text, and single values
+  const rawIngrRaw=Array.isArray(json.recipeIngredient)?json.recipeIngredient:
+                   (json.recipeIngredient?[json.recipeIngredient]:[]);
+  const rawIngr=rawIngrRaw.map(i=>{
+    if(typeof i==='string')return i.replace(/<[^>]+>/g,'').trim();
+    return(i.name||i.text||i['@value']||'').replace(/<[^>]+>/g,'').trim();
+  }).filter(s=>s.length>1);
   const ingredients=rawIngr.length?[{section:'Ingredients',items:rawIngr}]:[];
   // Steps
   // Helper: strip HTML tags from instruction text
@@ -1585,9 +1590,7 @@ async function fetchFromURL(){
     // Try to extract steps from <ol> lists in the DOM directly
     function domExtractSteps(d){
       const steps=[];
-      // Look for ordered lists with multiple items
       const ols=[...d.querySelectorAll('ol')].filter(ol=>ol.querySelectorAll('li').length>=2);
-      // Pick the longest <ol> (most likely the instructions)
       ols.sort((a,b)=>b.querySelectorAll('li').length-a.querySelectorAll('li').length);
       if(ols[0]){
         ols[0].querySelectorAll('li').forEach(li=>{
@@ -1599,6 +1602,29 @@ async function fetchFromURL(){
         });
       }
       return steps;
+    }
+    // Try to extract ingredients from <ul> lists in the DOM directly
+    function domExtractIngredients(d){
+      // Look for all <ul> lists; ingredient lists tend to be long with short items
+      const uls=[...d.querySelectorAll('ul')].filter(ul=>{
+        const items=ul.querySelectorAll('li');
+        if(items.length<2)return false;
+        // Ingredient items tend to be short (under 120 chars)
+        const avgLen=[...items].reduce((s,li)=>s+(li.textContent||'').trim().length,0)/items.length;
+        return avgLen<120;
+      });
+      if(!uls.length)return[];
+      // Pick the list whose items look most like ingredient strings
+      const ingrWordRx=/\b(?:cup|tbsp|tsp|oz|lb|gram|g\b|kg|ml|litre|liter|pinch|clove|bunch|slice|piece|large|medium|small|fresh|dried|chopped|minced|diced|divided|optional|to taste|\d+)\b/i;
+      uls.sort((a,b)=>{
+        const scoreA=[...a.querySelectorAll('li')].filter(li=>ingrWordRx.test(li.textContent||'')).length;
+        const scoreB=[...b.querySelectorAll('li')].filter(li=>ingrWordRx.test(li.textContent||'')).length;
+        return scoreB-scoreA;
+      });
+      const items=[...uls[0].querySelectorAll('li')]
+        .map(li=>(li.textContent||'').replace(/\s+/g,' ').trim())
+        .filter(t=>t.length>2&&t.length<200);
+      return items;
     }
     // Permissive text → steps (no cooking-verb filter; used after we've already stripped chrome)
     function textToSteps(txt){
@@ -1627,15 +1653,26 @@ async function fetchFromURL(){
             parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
         }
         parsed.steps=fallbackSteps;
-        state.addForm.urlStatus=parsed.steps.length?'success':'partial';
-        state.addForm.urlError=parsed.steps.length?'':'Recipe info found but steps could not be extracted. Try Paste Text.';
-      }else{
-        state.addForm.urlStatus='success';
       }
+      // Fallback if ingredients missing: try DOM <ul> extraction, then text parsing
+      if(!parsed.ingredients.length){
+        const domIngr=domExtractIngredients(doc);
+        if(domIngr.length){
+          parsed.ingredients=[{section:'Ingredients',items:domIngr}];
+        }else{
+          cleanDoc(doc);
+          const bodyText=docBodyText(doc);
+          const fb=parseRecipeText(bodyText);
+          if(fb.ingredients.length)parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
+        }
+      }
+      state.addForm.urlStatus=parsed.steps.length?'success':'partial';
+      state.addForm.urlError=parsed.steps.length?'':'Recipe info found but steps could not be extracted. Try Paste Text.';
       state.addForm.urlParsed=parsed;
     }else{
       // No JSON-LD — try DOM extraction first, then text parsing
       const domSteps=domExtractSteps(doc);
+      const domIngr=domExtractIngredients(doc);
       cleanDoc(doc);
       const bodyText=docBodyText(doc);
       const pageTitle=doc.querySelector('title')?.textContent?.replace(/\s*[-|–].*$/,'').trim()||'';
@@ -1644,7 +1681,8 @@ async function fetchFromURL(){
       if(bodyText.length<200)throw new Error('The page content could not be read. The site may require JavaScript or block automated access. Try copying the recipe text and using Paste Text instead.');
       const fb=parseRecipeText(bodyText);
       const finalSteps=domSteps.length>=fb.steps.length?domSteps:fb.steps;
-      state.addForm.urlParsed={name:pageTitle,description:metaDesc,image:ogImage,yield:'',difficulty:'Intermediate',cookware:[],ingredients:fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[],steps:finalSteps};
+      const finalIngr=domIngr.length?[{section:'Ingredients',items:domIngr}]:(fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[]);
+      state.addForm.urlParsed={name:pageTitle,description:metaDesc,image:ogImage,yield:'',difficulty:'Intermediate',cookware:[],ingredients:finalIngr,steps:finalSteps};
       state.addForm.urlStatus=finalSteps.length?'partial':'error';
       state.addForm.urlError=finalSteps.length?'No structured recipe found — extracted from page text. Please review the steps carefully.':'No recipe content detected. The site may block automated access. Try copying the text and using Paste Text.';
     }
