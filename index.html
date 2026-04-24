@@ -3,7 +3,53 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <title>Kitchen</title>
+  <title>Recipe Ripper</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Recipe Ripper">
+  <meta name="theme-color" content="#D4705A">
+  <script>
+  // Generate app icon and set as apple-touch-icon
+  (function(){
+    try{
+      const c=document.createElement('canvas');
+      c.width=512;c.height=512;
+      const ctx=c.getContext('2d');
+      // Background
+      const bg=ctx.createLinearGradient(0,0,512,512);
+      bg.addColorStop(0,'#D4705A');bg.addColorStop(1,'#B85A46');
+      ctx.fillStyle=bg;
+      ctx.beginPath();ctx.roundRect(0,0,512,512,100);ctx.fill();
+      // Scissors (two blades)
+      ctx.save();ctx.translate(256,180);ctx.rotate(-0.35);
+      ctx.strokeStyle='rgba(255,255,255,0.95)';ctx.lineWidth=28;ctx.lineCap='round';
+      // Blade 1
+      ctx.beginPath();ctx.moveTo(-100,0);ctx.lineTo(110,0);ctx.stroke();
+      // Blade 2
+      ctx.rotate(0.7);
+      ctx.beginPath();ctx.moveTo(-100,0);ctx.lineTo(110,0);ctx.stroke();
+      // Pivot circle
+      ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(0,0,22,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+      // Recipe card
+      ctx.fillStyle='rgba(255,255,255,0.92)';
+      ctx.beginPath();ctx.roundRect(146,290,220,170,14);ctx.fill();
+      // Lines on card
+      ctx.fillStyle='#D4705A';
+      [[175,326,164,12],[175,354,110,10],[175,378,140,10],[175,402,90,10]].forEach(([x,y,w,h])=>{
+        ctx.beginPath();ctx.roundRect(x,y,w,h,4);ctx.fill();
+      });
+      // Set as apple-touch-icon
+      const link=document.createElement('link');
+      link.rel='apple-touch-icon';link.href=c.toDataURL('image/png');
+      document.head.appendChild(link);
+      // Also set favicon
+      const fav=document.createElement('link');
+      fav.rel='icon';fav.type='image/png';fav.href=c.toDataURL('image/png');
+      document.head.appendChild(fav);
+    }catch(e){}
+  })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <style>
@@ -997,8 +1043,12 @@ function bnavHTML(){
 // ═══════════════════════════════════════
 //  RECIPE LIST
 // ═══════════════════════════════════════
+let listSearch='';
+function setSearch(v){listSearch=v;renderList();}
 function renderList(){
-  const cards=recipes.length?recipes.map(r=>{
+  const q=listSearch.trim().toLowerCase();
+  const visible=q?recipes.filter(r=>r.name.toLowerCase().includes(q)||((r.description||'').toLowerCase().includes(q))):recipes;
+  const cards=visible.length?visible.map(r=>{
     const ho=hoText(r);
     const img=r.image?`<img class="rc-img" src="${escH(r.image)}" alt="${escH(r.name)}" onerror="this.outerHTML='<div class=rc-img-ph>${escH(r.name.charAt(0))}</div>'">`:`<div class="rc-img-ph">${escH(r.name.charAt(0))}</div>`;
     return`<div class="recipe-card" onclick="go('detail',{id:${r.id}})">
@@ -1008,12 +1058,22 @@ function renderList(){
         <div class="rc-meta">${I.clock} ${ho||r.totalTime||r.difficulty||''}${r.yield?` &nbsp;·&nbsp; ${escH(r.yield)}`:''}</div>
       </div>
     </div>`;
-  }).join(''):`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No recipes yet</h3><p>Import from URL or add one manually.</p></div>`;
+  }).join(''):(q?`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No results</h3><p>No recipes match "${escH(q)}".</p></div>`:`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No recipes yet</h3><p>Import from URL or add one manually.</p></div>`);
   document.getElementById('app').innerHTML=`
     <div class="shell">
-      <div class="topbar"><div class="topbar-row"><div class="topbar-title">Kitchen</div><button class="ibtn" onclick="go('add')" aria-label="Add">${I.plus}</button></div></div>
+      <div class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-title">Recipe Ripper</div>
+          <button class="ibtn" onclick="go('add')" aria-label="Add">${I.plus}</button>
+        </div>
+        <div style="padding:6px 0 4px">
+          <input class="input" id="search-input" type="search" placeholder="Search recipes…" value="${escH(listSearch)}"
+            oninput="setSearch(this.value)" style="height:40px;border-radius:10px;font-size:.9rem;padding:0 14px">
+        </div>
+      </div>
       <div class="card-list">${cards}</div>
     </div>${bnavHTML()}`;
+  if(q)document.getElementById('search-input')?.focus();
 }
 
 // ═══════════════════════════════════════
@@ -1065,6 +1125,8 @@ function renderDetail(){
       <div style="position:sticky;top:0;z-index:200;background:rgba(255,255,255,.93);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);">
         <div style="display:flex;align-items:center;padding:max(14px,env(safe-area-inset-top)) 12px 10px;gap:4px">
           <button class="ibtn" onclick="go('list')">${I.back}</button>
+          <div style="flex:1"></div>
+          <button class="ibtn" style="color:var(--danger)" onclick="deleteRecipe(${r.id})" title="Delete recipe">${I.trash}</button>
         </div>
       </div>
       ${img}
@@ -1082,7 +1144,6 @@ function renderDetail(){
         <button class="btn btn-outline btn-full" onclick="addToShopList(${r.id})">Add ingredients to list</button>
         <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${r.id}})">Start cooking</button>
       </div>
-      ${r.id!==1?`<div style="padding:0 18px 20px"><button class="btn btn-full" style="background:none;color:var(--danger);border:1.5px solid #FECDC5;height:44px;font-size:.85rem;border-radius:10px" onclick="deleteRecipe(${r.id})">Delete recipe</button></div>`:''}
     </div>${bnavHTML()}`;
 }
 
