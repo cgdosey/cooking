@@ -137,6 +137,8 @@
     .btn-outline:hover{background:var(--terra-bg);}
     .btn-ghost{background:none;color:var(--text-2);border:1.5px solid var(--border);}
     .btn-ghost:hover{background:var(--bg-2);}
+    .btn-danger{background:var(--danger);color:#fff;}
+    .btn-danger:hover{background:#b83438;}
     .btn-full{width:100%;}
     .btn-lg{height:54px;font-size:.95rem;border-radius:14px;}
     /* ── RECIPE CARDS ── */
@@ -403,6 +405,24 @@
       font-family:inherit;white-space:nowrap;
     }
     .back-recipe-btn svg{width:16px;height:16px;flex-shrink:0;}
+    /* ── CONFIRM SHEET ── */
+    .confirm-backdrop{
+      position:fixed;inset:0;z-index:900;
+      background:rgba(0,0,0,.45);
+      display:flex;align-items:flex-end;justify-content:center;
+      animation:fadeIn .18s ease;
+    }
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .confirm-sheet{
+      width:100%;max-width:480px;
+      background:#fff;border-radius:20px 20px 0 0;
+      padding:24px 20px calc(24px + env(safe-area-inset-bottom,0px));
+      animation:slideUp .22s ease;
+    }
+    @keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:none;opacity:1}}
+    .confirm-title{font-size:1.1rem;font-weight:800;margin-bottom:6px;}
+    .confirm-msg{font-size:.9rem;color:var(--text-2);line-height:1.5;margin-bottom:22px;}
+    .confirm-btns{display:flex;flex-direction:column;gap:10px;}
     /* ── ADD RECIPE ── */
     .add-page{padding:0 18px 32px;}
     .add-tabs{
@@ -782,15 +802,42 @@ function removeRecipeFromShop(recipeId){
   shoppingList=shoppingList.filter(i=>i.recipeId!==recipeId);
   saveShopList();render();
 }
+function showConfirm({title,msg,confirmLabel,confirmClass,onConfirm}){
+  const id='confirm-backdrop-'+Date.now();
+  const div=document.createElement('div');
+  div.className='confirm-backdrop';div.id=id;
+  div.innerHTML=`
+    <div class="confirm-sheet" onclick="event.stopPropagation()">
+      <div class="confirm-title">${escH(title)}</div>
+      <div class="confirm-msg">${escH(msg)}</div>
+      <div class="confirm-btns">
+        <button class="btn ${confirmClass||'btn-terra'} btn-full" id="${id}-ok">${escH(confirmLabel||'Confirm')}</button>
+        <button class="btn btn-ghost btn-full" onclick="document.getElementById('${id}').remove()">Cancel</button>
+      </div>
+    </div>`;
+  div.addEventListener('click',()=>div.remove());
+  document.body.appendChild(div);
+  document.getElementById(id+'-ok').addEventListener('click',()=>{div.remove();onConfirm();});
+}
 function clearChecked(){
   shoppingList=shoppingList.filter(i=>!i.checked);
-  saveShopList();render();
+  saveShopList();renderShopList();
+}
+function clearAll(){
+  showConfirm({
+    title:'Clear entire list?',
+    msg:'This will remove all '+shoppingList.length+' item'+(shoppingList.length===1?'':'s')+' from your shopping list.',
+    confirmLabel:'Clear all',
+    confirmClass:'btn-danger',
+    onConfirm(){shoppingList=[];saveShopList();renderShopList();}
+  });
 }
 function patchShopList(){
   const el=document.getElementById('shop-body');
   if(el)el.innerHTML=shopBodyHTML();
   const btn=document.getElementById('shop-clear-btn');
   if(btn){const c=shoppingList.some(i=>i.checked);btn.style.opacity=c?1:.35;btn.style.pointerEvents=c?'auto':'none';}
+  // Refresh full header state (both buttons) by re-rendering
 }
 
 // ═══════════════════════════════════════
@@ -1430,7 +1477,10 @@ function renderShopList(){
       <div class="shop-hdr">
         <div class="shop-hdr-row">
           <div class="shop-title">Shopping List</div>
-          <button class="btn btn-ghost" style="height:36px;font-size:.8rem;padding:0 14px;opacity:${hasChecked?1:.35};pointer-events:${hasChecked?'auto':'none'}" id="shop-clear-btn" onclick="clearChecked()">Clear checked</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-ghost" style="height:34px;font-size:.78rem;padding:0 11px;opacity:${hasChecked?1:.35};pointer-events:${hasChecked?'auto':'none'}" id="shop-clear-btn" onclick="clearChecked()">Clear checked</button>
+            <button class="btn btn-ghost" style="height:34px;font-size:.78rem;padding:0 11px;opacity:${shoppingList.length?1:.35};pointer-events:${shoppingList.length?'auto':'none'};color:var(--danger);border-color:var(--danger)" onclick="clearAll()">Clear all</button>
+          </div>
         </div>
         <div style="display:flex;gap:8px;padding:8px 0 4px">
           <input class="input" id="shop-manual-input" placeholder="Add an item…" style="flex:1;height:40px;border-radius:10px" onkeydown="if(event.key==='Enter')addManualShopItem()"/>
