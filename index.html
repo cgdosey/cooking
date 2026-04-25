@@ -9,41 +9,75 @@
   <meta name="apple-mobile-web-app-title" content="Recipe Ripper">
   <meta name="theme-color" content="#D4705A">
   <script>
-  // Generate app icon and set as apple-touch-icon
+  // Generate app icon — ramen bowl on terracotta background
   (function(){
     try{
       const c=document.createElement('canvas');
       c.width=512;c.height=512;
       const ctx=c.getContext('2d');
-      // Background
-      const bg=ctx.createLinearGradient(0,0,512,512);
+      const W=512,H=512;
+
+      // ── Background ──
+      const bg=ctx.createLinearGradient(0,0,W,H);
       bg.addColorStop(0,'#D4705A');bg.addColorStop(1,'#B85A46');
       ctx.fillStyle=bg;
-      ctx.beginPath();ctx.roundRect(0,0,512,512,100);ctx.fill();
-      // Scissors (two blades)
-      ctx.save();ctx.translate(256,180);ctx.rotate(-0.35);
-      ctx.strokeStyle='rgba(255,255,255,0.95)';ctx.lineWidth=28;ctx.lineCap='round';
-      // Blade 1
-      ctx.beginPath();ctx.moveTo(-100,0);ctx.lineTo(110,0);ctx.stroke();
-      // Blade 2
-      ctx.rotate(0.7);
-      ctx.beginPath();ctx.moveTo(-100,0);ctx.lineTo(110,0);ctx.stroke();
-      // Pivot circle
-      ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(0,0,22,0,Math.PI*2);ctx.fill();
-      ctx.restore();
-      // Recipe card
-      ctx.fillStyle='rgba(255,255,255,0.92)';
-      ctx.beginPath();ctx.roundRect(146,290,220,170,14);ctx.fill();
-      // Lines on card
-      ctx.fillStyle='#D4705A';
-      [[175,326,164,12],[175,354,110,10],[175,378,140,10],[175,402,90,10]].forEach(([x,y,w,h])=>{
-        ctx.beginPath();ctx.roundRect(x,y,w,h,4);ctx.fill();
+      ctx.beginPath();ctx.roundRect(0,0,W,H,100);ctx.fill();
+
+      ctx.save();
+      ctx.translate(W/2,H/2+20);
+      const S=1.18;ctx.scale(S,S);
+      ctx.strokeStyle='#fff';ctx.fillStyle='#fff';
+      ctx.lineCap='round';ctx.lineJoin='round';
+
+      // ── Steam ──
+      function steam(x,yTop,amp,freq){
+        ctx.beginPath();
+        for(let i=0;i<=12;i++){
+          const t=i/12;const y=yTop+70-t*70;
+          const xOff=amp*Math.sin(t*Math.PI*freq);
+          if(i===0)ctx.moveTo(x+xOff,y);else ctx.lineTo(x+xOff,y);
+        }
+        ctx.strokeStyle='rgba(255,255,255,0.9)';ctx.lineWidth=13;ctx.stroke();
+      }
+      steam(-52,-150,11,2.2);steam(0,-168,13,2.2);steam(52,-150,11,2.2);
+
+      // ── Chopsticks ──
+      ctx.strokeStyle='rgba(255,255,255,0.95)';ctx.lineWidth=14;
+      ctx.beginPath();ctx.moveTo(20,-178);ctx.lineTo(90,-55);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(60,-172);ctx.lineTo(125,-42);ctx.stroke();
+
+      // ── Bowl body ──
+      const rimY=-72,rimRx=168,rimRy=26;
+      ctx.fillStyle='#fff';
+      ctx.beginPath();
+      ctx.ellipse(0,rimY,rimRx,rimRy,0,Math.PI,0,true);
+      ctx.bezierCurveTo(rimRx,rimY+18,152,108,88,152);
+      ctx.lineTo(58,152);ctx.arcTo(58,172,-58,172,12);
+      ctx.lineTo(-58,172);ctx.arcTo(-58,172,-88,152,12);
+      ctx.lineTo(-88,152);
+      ctx.bezierCurveTo(-152,108,-rimRx,rimY+18,-rimRx,rimY);
+      ctx.closePath();ctx.fill();
+
+      // ── Inner bowl ──
+      ctx.fillStyle='#B85A46';
+      ctx.beginPath();ctx.ellipse(0,rimY,rimRx-16,rimRy-5,0,0,Math.PI*2);ctx.fill();
+
+      // ── Noodles ──
+      ctx.strokeStyle='#fff';ctx.lineWidth=12;
+      [0.58,0.72,0.86].forEach(r=>{
+        ctx.beginPath();ctx.arc(0,rimY,(rimRx-20)*r,Math.PI*0.08,Math.PI*0.92);ctx.stroke();
       });
-      // Set as apple-touch-icon
+
+      // ── Rim highlight ──
+      ctx.strokeStyle='#fff';ctx.lineWidth=15;
+      ctx.beginPath();ctx.ellipse(0,rimY,rimRx,rimRy,0,0,Math.PI*2);ctx.stroke();
+
+      ctx.restore();
+
+      // Set as apple-touch-icon and favicon
       const link=document.createElement('link');
       link.rel='apple-touch-icon';link.href=c.toDataURL('image/png');
       document.head.appendChild(link);
-      // Also set favicon
       const fav=document.createElement('link');
       fav.rel='icon';fav.type='image/png';fav.href=c.toDataURL('image/png');
       document.head.appendChild(fav);
