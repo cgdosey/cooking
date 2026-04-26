@@ -1800,7 +1800,7 @@ async function processScanFiles(fileList){
   renderAdd();
 }
 
-const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct','llama-3.2-90b-vision-preview','llama-3.2-11b-vision-preview'];
+const GROQ_MODELS=['llama-3.2-11b-vision-preview','llama-3.2-90b-vision-preview'];
 
 async function callGroq(images,prompt){
   const key=GROQ_KEY;
@@ -1849,7 +1849,8 @@ async function scanExtractWithGroq(){
   if(!scanForm.images.length){showToast('Add at least one photo first');return;}
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
-    const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d)));
+    // Compress aggressively for API — 800px max, 0.65 quality keeps payload small
+    const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d,800,0.65)));
     const n=compressed.length;
     const prompt=n>1
       ?`These are ${n} pages of the same recipe. Extract the COMPLETE recipe across ALL pages. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}\nInclude every ingredient and every step visible across all pages.`
