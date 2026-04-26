@@ -1742,13 +1742,13 @@ async function callGroq(images,prompt){
   let lastErr='';
   for(const model of GROQ_MODELS){
     try{
-      console.log('→ Groq model:',model);
-      const content=[
-        {type:'image_url',image_url:{url:images[0]}},
-        {type:'text',text:images.length>1
-          ?`There are ${images.length} pages of this recipe. This is page 1. ${prompt}`
-          :prompt}
-      ];
+      console.log('→ Groq model:',model,'images:',images.length);
+      const content=[];
+      images.forEach((img,i)=>{
+        if(images.length>1) content.push({type:'text',text:`Page ${i+1} of ${images.length}:`});
+        content.push({type:'image_url',image_url:{url:img}});
+      });
+      content.push({type:'text',text:prompt});
       const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
@@ -1768,9 +1768,10 @@ async function scanExtractWithGroq(){
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
     const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d)));
-    const prompt=`Extract the complete recipe from this image. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:
-{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}
-Include every ingredient and every step visible.`;
+    const n=compressed.length;
+    const prompt=n>1
+      ?`These are ${n} pages of the same recipe. Extract the COMPLETE recipe across ALL pages. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}\nInclude every ingredient and every step visible across all pages.`
+      :`Extract the complete recipe from this image. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}\nInclude every ingredient and every step visible.`;
     const data=await callGroq(compressed,prompt);
     const raw=data.choices?.[0]?.message?.content||'';
     const jsonStr=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
