@@ -1780,7 +1780,7 @@ function fileToDataURL(file){
   return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsDataURL(file);});
 }
 
-// Resize + compress image to keep API payload small
+// Resize + compress image, then iteratively reduce until under maxBytes
 function compressImage(dataURL,maxDim=1536,quality=0.85){
   return new Promise(res=>{
     const img=new Image();
@@ -1795,11 +1795,27 @@ function compressImage(dataURL,maxDim=1536,quality=0.85){
         cv.width=w;cv.height=h;
         cv.getContext('2d').drawImage(img,0,0,w,h);
         res(cv.toDataURL('image/jpeg',quality));
-      }catch(e){res(dataURL);} // canvas taint fallback
+      }catch(e){res(dataURL);}
     };
-    img.onerror=()=>res(dataURL); // fallback: use original
+    img.onerror=()=>res(dataURL);
     img.src=dataURL;
   });
+}
+
+// Compress for API: iteratively shrink until base64 is under ~500KB
+async function compressForAPI(dataURL){
+  let dim=800,q=0.65;
+  for(let attempt=0;attempt<6;attempt++){
+    const out=await compressImage(dataURL,dim,q);
+    const kb=Math.round(out.length/1024);
+    console.log(`compress attempt ${attempt+1}: ${dim}px q=${q} → ${kb}KB`);
+    if(out.length<500*1024) return out;  // under 500KB — good
+    // Reduce aggressively each round
+    dim=Math.round(dim*0.7);
+    q=Math.max(0.3,q-0.1);
+  }
+  // Last resort — return whatever we have even if large
+  return compressImage(dataURL,300,0.3);
 }
 
 async function processScanFiles(fileList){
@@ -1811,7 +1827,7 @@ async function processScanFiles(fileList){
   renderAdd();
 }
 
-const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct','meta-llama/llama-4-maverick-17b-128e-instruct'];
+const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct'];
 
 async function callGroq(images,prompt){
   const key=GROQ_KEY;
@@ -1888,8 +1904,8 @@ async function scanExtractWithGroq(){
       console.warn('Ping failed (non-fatal):',e.message);
     }
 
-    // Compress each image individually — 700px max, 0.6 quality ~40-60KB each
-    const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d,700,0.6)));
+    // Compress each image, iterating until under 500KB
+    const compressed=await Promise.all(scanForm.images.map(d=>compressForAPI(d)));
     const singlePrompt=`Extract the complete recipe from this image. Return ONLY valid JSON, no markdown, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour"],"steps":["Step text here."]}`;
     const extraPrompt=`This is an additional page of the same recipe. Extract any extra ingredients and steps not already found. Return ONLY valid JSON:\n{"name":"","ingredients":["any new ingredients"],"steps":["any new steps"]}`;
 
