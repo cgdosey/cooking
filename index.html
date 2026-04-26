@@ -1780,42 +1780,41 @@ function fileToDataURL(file){
   return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsDataURL(file);});
 }
 
-// Resize + compress image, then iteratively reduce until under maxBytes
-function compressImage(dataURL,maxDim=1536,quality=0.85){
-  return new Promise(res=>{
-    const img=new Image();
-    img.onload=()=>{
-      try{
-        let w=img.width,h=img.height;
-        if(w>maxDim||h>maxDim){
-          if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
-          else{w=Math.round(w*maxDim/h);h=maxDim;}
-        }
-        const cv=document.createElement('canvas');
-        cv.width=w;cv.height=h;
-        cv.getContext('2d').drawImage(img,0,0,w,h);
-        res(cv.toDataURL('image/jpeg',quality));
-      }catch(e){res(dataURL);}
-    };
-    img.onerror=()=>res(dataURL);
-    img.src=dataURL;
-  });
+// Compress image using createImageBitmap (reliable on desktop Chrome)
+async function compressImage(dataURL,maxDim=1536,quality=0.85){
+  try{
+    // Fetch converts data URL → blob, avoiding canvas taint issues
+    const blob=await fetch(dataURL).then(r=>r.blob());
+    const bmp=await createImageBitmap(blob);
+    let w=bmp.width,h=bmp.height;
+    if(w>maxDim||h>maxDim){
+      if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
+      else{w=Math.round(w*maxDim/h);h=maxDim;}
+    }
+    const cv=document.createElement('canvas');
+    cv.width=w;cv.height=h;
+    cv.getContext('2d').drawImage(bmp,0,0,w,h);
+    if(bmp.close)bmp.close();
+    return cv.toDataURL('image/jpeg',quality);
+  }catch(e){
+    console.warn('compressImage failed:',e.message,'; using original');
+    return dataURL;
+  }
 }
 
-// Compress for API: iteratively shrink until base64 is under ~500KB
+// Compress for API: iteratively shrink until base64 is under ~400KB
 async function compressForAPI(dataURL){
-  let dim=800,q=0.65;
+  let dim=900,q=0.7;
   for(let attempt=0;attempt<6;attempt++){
     const out=await compressImage(dataURL,dim,q);
     const kb=Math.round(out.length/1024);
     console.log(`compress attempt ${attempt+1}: ${dim}px q=${q} → ${kb}KB`);
-    if(out.length<500*1024) return out;  // under 500KB — good
-    // Reduce aggressively each round
-    dim=Math.round(dim*0.7);
-    q=Math.max(0.3,q-0.1);
+    if(out.length<400*1024)return out;
+    dim=Math.round(dim*0.65);
+    q=Math.max(0.25,q-0.1);
   }
-  // Last resort — return whatever we have even if large
-  return compressImage(dataURL,300,0.3);
+  console.warn('Could not compress below 400KB; sending smallest achieved');
+  return compressImage(dataURL,200,0.25);
 }
 
 async function processScanFiles(fileList){
