@@ -1829,17 +1829,19 @@ async function compressImage(dataURL,maxDim=1536,quality=0.85){
 
 // Compress for API: iteratively shrink until base64 is under ~400KB
 async function compressForAPI(dataURL){
-  let dim=900,q=0.7;
-  for(let attempt=0;attempt<6;attempt++){
+  // Start higher for text readability — drop only if too large
+  const attempts=[
+    [1600,0.82],[1200,0.78],[1000,0.72],[800,0.65],[600,0.55],[400,0.45]
+  ];
+  for(let i=0;i<attempts.length;i++){
+    const[dim,q]=attempts[i];
     const out=await compressImage(dataURL,dim,q);
     const kb=Math.round(out.length/1024);
-    console.log(`compress attempt ${attempt+1}: ${dim}px q=${q} → ${kb}KB`);
-    if(out.length<400*1024)return out;
-    dim=Math.round(dim*0.65);
-    q=Math.max(0.25,q-0.1);
+    console.log(`compress attempt ${i+1}: ${dim}px q=${q} → ${kb}KB`);
+    if(out.length<600*1024)return out; // 600KB limit — Groq handles this fine
   }
-  console.warn('Could not compress below 400KB; sending smallest achieved');
-  return compressImage(dataURL,200,0.25);
+  console.warn('Could not compress below 600KB; sending smallest');
+  return compressImage(dataURL,400,0.4);
 }
 
 // Load heic2any on demand for HEIC→JPEG conversion
@@ -1970,8 +1972,21 @@ async function scanExtractWithGroq(){
 
     // Compress each image, iterating until under 500KB
     const compressed=await Promise.all(scanForm.images.map(d=>compressForAPI(d)));
-    const singlePrompt=`Extract the complete recipe from this image. Return ONLY valid JSON, no markdown, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour"],"steps":["Step text here."]}`;
-    const extraPrompt=`This is an additional page of the same recipe. Extract any extra ingredients and steps not already found. Return ONLY valid JSON:\n{"name":"","ingredients":["any new ingredients"],"steps":["any new steps"]}`;
+    const singlePrompt=`You are reading a recipe. Read EVERY word carefully — do not skip or summarise anything.
+
+Extract the COMPLETE recipe. Include:
+- The exact recipe name
+- ALL ingredients with their exact quantities and units (e.g. "450g bread flour", "2 tsp salt") — do not skip any
+- ALL steps in full — copy the complete instruction text for each step, do not truncate
+
+Return ONLY a valid JSON object, no markdown, no explanation, nothing else:
+{"name":"Full Recipe Name","ingredients":["450g bread flour","2 tsp fine sea salt","7g instant yeast"],"steps":["Complete text of step 1.","Complete text of step 2."]}`;
+
+    const extraPrompt=`This is another page of the same recipe. Read every word carefully.
+
+Extract any ingredients and steps shown on THIS page that are not already captured. Return ONLY valid JSON:
+{"name":"","ingredients":["exact quantity and ingredient for anything new"],"steps":["Complete text of each new step shown on this page."]}`;
+
 
     // Process images one at a time to avoid payload limits
     let merged={name:'',ingredients:[],steps:[]};
