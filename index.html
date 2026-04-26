@@ -1250,8 +1250,8 @@ function renderDetail(){
   const img=`<div style="position:relative">
     ${imgEl}
     <label title="Change cover photo" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(4px);overflow:hidden;flex-shrink:0">
-      <span style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${I.camera}</span>
-      <input type="file" accept="image/*" style="display:none" onchange="uploadRecipeCover(${r.id},this)">
+      <span style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;pointer-events:none">${I.camera}</span>
+      <input type="file" accept="image/*" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer" onchange="uploadRecipeCover(${r.id},this)">
     </label>
   </div>`;
   let tabContent='';
@@ -1743,7 +1743,7 @@ const GROQ_KEY=atob('Z3NrX3dIWXZBM0R3R3JSUU9yR1JqWWsyV0dkeWIzRll6UGlXYldreFBXYzJ
 
 let scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};
 
-function scanReset(){scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};renderAdd();}
+function scanReset(){scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[],errorMsg:''};renderAdd();}
 function scanAddStep(){scanForm.steps.push({instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''});renderAdd();}
 function scanRemoveStep(i){scanForm.steps.splice(i,1);renderAdd();}
 function scanPrev(){if(scanForm.currentIdx>0){scanForm.currentIdx--;renderAdd();}}
@@ -1814,15 +1814,32 @@ async function callGroq(images,prompt){
         content.push({type:'image_url',image_url:{url:img}});
       });
       content.push({type:'text',text:prompt});
-      const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
-        body:JSON.stringify({model,messages:[{role:'user',content}],temperature:0.1,max_tokens:2048})
-      });
+
+      // 45-second timeout so the UI never stays permanently stuck
+      const controller=new AbortController();
+      const tid=setTimeout(()=>controller.abort(),45000);
+      let resp;
+      try{
+        resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+          body:JSON.stringify({model,messages:[{role:'user',content}],temperature:0.1,max_tokens:2048}),
+          signal:controller.signal
+        });
+      }finally{clearTimeout(tid);}
+
       const json=await resp.json();
-      if(!resp.ok){console.warn(model,'error:',json?.error?.message);lastErr=json?.error?.message||`HTTP ${resp.status}`;continue;}
+      if(!resp.ok){
+        const msg=json?.error?.message||`HTTP ${resp.status}`;
+        console.warn(model,'error:',msg);
+        lastErr=msg;
+        continue;
+      }
       return json;
-    }catch(e){lastErr=e.message;console.warn(model,'exception:',e.message);}
+    }catch(e){
+      lastErr=e.name==='AbortError'?'Request timed out (45s)':e.message;
+      console.warn(model,'exception:',lastErr);
+    }
   }
   throw new Error(lastErr||'All Groq models failed');
 }
@@ -1854,9 +1871,9 @@ async function scanExtractWithGroq(){
     if(!scanForm.steps.length) scanForm.steps=[{instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''}];
     renderAdd();
   }catch(e){
-    console.error('Gemini error:',e);
-    scanForm={...scanForm,status:'viewing'};renderAdd();
-    showToast('Error: '+(e.message||'Could not read recipe — try again'));
+    console.error('Groq scan error:',e);
+    scanForm={...scanForm,status:'error',errorMsg:e.message||'Could not read recipe'};renderAdd();
+    showToast('Could not read recipe — see details below');
   }
 }
 
@@ -1897,6 +1914,19 @@ function renderScanTab(){
         <div class="url-spinner" style="margin:0 auto 18px;width:36px;height:36px;border-width:4px"></div>
         <div style="font-size:1rem;font-weight:600;color:var(--text);margin-bottom:6px">Reading recipe…</div>
         <div style="font-size:.85rem;color:var(--text-2)">AI is extracting ingredients and steps</div>
+        <div style="font-size:.78rem;color:var(--text-3);margin-top:10px">This can take up to 30 seconds</div>
+      </div>`;
+  }
+
+  if(sf.status==='error'){
+    return`
+      <div style="padding:24px 0 8px">
+        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px;margin-bottom:18px">
+          <div style="font-size:.88rem;font-weight:700;color:#B91C1C;margin-bottom:4px">Could not read recipe</div>
+          <div style="font-size:.82rem;color:#7F1D1D;line-height:1.6">${escH(sf.errorMsg||'Unknown error')}</div>
+        </div>
+        <button class="btn btn-terra btn-full" onclick="scanForm={...scanForm,status:'viewing'};renderAdd()" style="margin-bottom:10px">Try Again</button>
+        <button class="btn btn-ghost btn-full" onclick="scanReset()">Start Over</button>
       </div>`;
   }
 
