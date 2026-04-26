@@ -1733,8 +1733,26 @@ async function processScanFiles(fileList){
   renderAdd();
 }
 
-// Try each model in order until one works
-const GEMINI_MODELS=['gemini-2.0-flash-lite','gemini-2.0-flash','gemini-1.5-flash-latest','gemini-1.5-flash-002'];
+async function discoverGeminiModel(){
+  // Ask the API which models are actually available for this key
+  try{
+    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
+    if(!r.ok) return null;
+    const d=await r.json();
+    const available=(d.models||[])
+      .filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent'))
+      .map(m=>m.name.replace('models/',''));
+    console.log('Available Gemini models:',available);
+    // Prefer flash models (fast + free tier); skip embedding/aqa/text-only models
+    const skip=/embedding|aqa|text-bison|chat-bison/i;
+    const prefer=['flash','pro'];
+    for(const p of prefer){
+      const found=available.find(m=>m.includes(p)&&!skip.test(m));
+      if(found) return found;
+    }
+    return available.find(m=>!skip.test(m))||null;
+  }catch(e){console.warn('ListModels failed:',e);return null;}
+}
 
 async function callGemini(model,body){
   const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,{
@@ -1755,8 +1773,8 @@ async function scanExtractWithGemini(){
     // Compress images before sending to keep payload under API limits
     const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d)));
     const imgParts=compressed.map(dataURL=>({
-      inline_data:{
-        mime_type:'image/jpeg',
+      inlineData:{
+        mimeType:'image/jpeg',
         data:dataURL.split(',')[1]
       }
     }));
@@ -1764,13 +1782,11 @@ async function scanExtractWithGemini(){
 {"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}
 Include every ingredient and every step visible across all images.`;
     const body={contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{temperature:0.1,maxOutputTokens:2048}};
-    let data=null;
-    let lastErr='';
-    for(const model of GEMINI_MODELS){
-      try{data=await callGemini(model,body);break;}
-      catch(e){lastErr=e.message;console.warn(`${model} failed:`,e.message);}
-    }
-    if(!data) throw new Error(lastErr);
+    // Discover which model to use, then call it
+    const model=await discoverGeminiModel();
+    if(!model) throw new Error('No compatible Gemini model found for this API key');
+    console.log('Using model:',model);
+    const data=await callGemini(model,body);
     const raw=data.candidates?.[0]?.content?.parts?.[0]?.text||'';
     const jsonStr=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
     const recipe=JSON.parse(jsonStr);
