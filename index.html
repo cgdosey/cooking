@@ -936,6 +936,18 @@ async function uploadRecipeCover(recipeId,input){
   render();
 }
 
+function uploadRecipeCoverPrompt(recipeId){
+  let inp=document.getElementById('_cover-upload-input');
+  if(!inp){
+    inp=document.createElement('input');
+    inp.type='file';inp.id='_cover-upload-input';inp.accept='image/*';
+    inp.style.cssText='position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none';
+    document.body.appendChild(inp);
+  }
+  inp.onchange=()=>{uploadRecipeCover(recipeId,inp);inp.value='';};
+  inp.click();
+}
+
 function applyCustomTimer(){
   const input=document.getElementById('custom-timer-input');
   const mins=parseInt(input?.value||'0',10);
@@ -1249,9 +1261,8 @@ function renderDetail(){
     :`<div class="detail-img-ph">${escH(r.name.charAt(0))}</div>`;
   const img=`<div style="position:relative">
     ${imgEl}
-    <label title="Change cover photo" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(4px);overflow:hidden;flex-shrink:0">
-      <span style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;pointer-events:none">${I.camera}</span>
-      <input type="file" accept="image/*" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer" onchange="uploadRecipeCover(${r.id},this)">
+    <label title="Change cover photo" onclick="uploadRecipeCoverPrompt(${r.id})" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(4px);z-index:10">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
     </label>
   </div>`;
   let tabContent='';
@@ -1805,25 +1816,28 @@ const GROQ_MODELS=['llama-3.2-11b-vision-preview','llama-3.2-90b-vision-preview'
 async function callGroq(images,prompt){
   const key=GROQ_KEY;
   let lastErr='';
+  const body=JSON.stringify({messages:[{role:'user',content:[
+    ...images.map(img=>({type:'image_url',image_url:{url:img}})),
+    {type:'text',text:prompt}
+  ]}],temperature:0.1,max_tokens:2048});
+  console.log('→ Groq request size:',Math.round(body.length/1024)+'KB','images:',images.length);
+
   for(const model of GROQ_MODELS){
     try{
-      console.log('→ Groq model:',model,'images:',images.length);
-      const content=[];
-      images.forEach((img,i)=>{
-        if(images.length>1) content.push({type:'text',text:`Page ${i+1} of ${images.length}:`});
-        content.push({type:'image_url',image_url:{url:img}});
-      });
-      content.push({type:'text',text:prompt});
+      console.log('→ trying model:',model);
+      const payload=JSON.stringify({model,messages:[{role:'user',content:[
+        ...images.map(img=>({type:'image_url',image_url:{url:img}})),
+        {type:'text',text:prompt}
+      ]}],temperature:0.1,max_tokens:2048});
 
-      // 45-second timeout so the UI never stays permanently stuck
       const controller=new AbortController();
-      const tid=setTimeout(()=>controller.abort(),45000);
+      const tid=setTimeout(()=>controller.abort(),90000); // 90s timeout
       let resp;
       try{
         resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
           method:'POST',
           headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
-          body:JSON.stringify({model,messages:[{role:'user',content}],temperature:0.1,max_tokens:2048}),
+          body:payload,
           signal:controller.signal
         });
       }finally{clearTimeout(tid);}
@@ -1831,17 +1845,27 @@ async function callGroq(images,prompt){
       const json=await resp.json();
       if(!resp.ok){
         const msg=json?.error?.message||`HTTP ${resp.status}`;
-        console.warn(model,'error:',msg);
+        console.warn(model,'→',msg);
         lastErr=msg;
         continue;
       }
+      console.log('✓ success with',model);
       return json;
     }catch(e){
-      lastErr=e.name==='AbortError'?'Request timed out (45s)':e.message;
-      console.warn(model,'exception:',lastErr);
+      lastErr=e.name==='AbortError'?'Request timed out after 90s — check your network connection':e.message;
+      console.warn(model,'failed:',lastErr);
     }
   }
   throw new Error(lastErr||'All Groq models failed');
+}
+
+function parseGroqJSON(raw){
+  const s=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+  // Try direct parse first, then find first {...} block
+  try{return JSON.parse(s);}catch(_){}
+  const m=s.match(/\{[\s\S]*\}/);
+  if(m)return JSON.parse(m[0]);
+  throw new Error('No JSON found in response');
 }
 
 async function scanExtractWithGroq(){
@@ -1849,22 +1873,52 @@ async function scanExtractWithGroq(){
   if(!scanForm.images.length){showToast('Add at least one photo first');return;}
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
-    // Compress aggressively for API — 800px max, 0.65 quality keeps payload small
-    const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d,800,0.65)));
-    const n=compressed.length;
-    const prompt=n>1
-      ?`These are ${n} pages of the same recipe. Extract the COMPLETE recipe across ALL pages. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}\nInclude every ingredient and every step visible across all pages.`
-      :`Extract the complete recipe from this image. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}\nInclude every ingredient and every step visible.`;
-    const data=await callGroq(compressed,prompt);
-    const raw=data.choices?.[0]?.message?.content||'';
-    const jsonStr=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
-    const recipe=JSON.parse(jsonStr);
+    // Quick reachability check — fail fast if network blocks Groq
+    try{
+      const ping=await fetch('https://api.groq.com/openai/v1/models',{
+        headers:{'Authorization':`Bearer ${GROQ_KEY}`},
+        signal:AbortSignal.timeout(8000)
+      });
+      if(!ping.ok&&ping.status===401)throw new Error('Invalid API key');
+      console.log('✓ Groq reachable, status:',ping.status);
+    }catch(e){
+      if(e.name==='TimeoutError'||e.name==='AbortError')
+        throw new Error('Cannot reach the Groq API from this network. Photo scanning may be blocked by a firewall or VPN. Try on a different network or use mobile.');
+      if(e.message.includes('API key'))throw e;
+      console.warn('Ping failed (non-fatal):',e.message);
+    }
+
+    // Compress each image individually — 700px max, 0.6 quality ~40-60KB each
+    const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d,700,0.6)));
+    const singlePrompt=`Extract the complete recipe from this image. Return ONLY valid JSON, no markdown, no explanation:\n{"name":"Recipe Name","ingredients":["1 cup flour"],"steps":["Step text here."]}`;
+    const extraPrompt=`This is an additional page of the same recipe. Extract any extra ingredients and steps not already found. Return ONLY valid JSON:\n{"name":"","ingredients":["any new ingredients"],"steps":["any new steps"]}`;
+
+    // Process images one at a time to avoid payload limits
+    let merged={name:'',ingredients:[],steps:[]};
+    for(let i=0;i<compressed.length;i++){
+      const prompt=i===0?singlePrompt:extraPrompt;
+      const data=await callGroq([compressed[i]],prompt);
+      const raw=data.choices?.[0]?.message?.content||'';
+      const page=parseGroqJSON(raw);
+      if(i===0){
+        merged.name=page.name||'Scanned Recipe';
+        merged.ingredients=[...(page.ingredients||[])];
+        merged.steps=[...(page.steps||[])];
+      }else{
+        // Merge additional pages — deduplicate by text similarity
+        (page.ingredients||[]).forEach(ing=>{
+          if(!merged.ingredients.some(x=>x.toLowerCase()===ing.toLowerCase()))merged.ingredients.push(ing);
+        });
+        merged.steps=[...merged.steps,...(page.steps||[])];
+      }
+    }
+
     scanForm={
       ...scanForm,
       status:'editing',
-      name:recipe.name||'Scanned Recipe',
-      ingrText:(recipe.ingredients||[]).join('\n'),
-      steps:(recipe.steps||[]).map(s=>({
+      name:merged.name,
+      ingrText:merged.ingredients.join('\n'),
+      steps:merged.steps.map(s=>({
         instructions:s,timerMinutes:detectTimer(s),
         title:summarizeStepTitle(s),phase:'',timerLabel:'',image:''
       }))
@@ -1915,7 +1969,7 @@ function renderScanTab(){
         <div class="url-spinner" style="margin:0 auto 18px;width:36px;height:36px;border-width:4px"></div>
         <div style="font-size:1rem;font-weight:600;color:var(--text);margin-bottom:6px">Reading recipe…</div>
         <div style="font-size:.85rem;color:var(--text-2)">AI is extracting ingredients and steps</div>
-        <div style="font-size:.78rem;color:var(--text-3);margin-top:10px">This can take up to 30 seconds</div>
+        <div style="font-size:.78rem;color:var(--text-3);margin-top:10px">This can take up to 90 seconds on desktop</div>
       </div>`;
   }
 
