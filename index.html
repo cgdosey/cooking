@@ -1780,26 +1780,51 @@ function fileToDataURL(file){
   return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsDataURL(file);});
 }
 
-// Compress image using createImageBitmap (reliable on desktop Chrome)
+// Compress image — tries createImageBitmap first, falls back to Image element
 async function compressImage(dataURL,maxDim=1536,quality=0.85){
-  try{
-    // Fetch converts data URL → blob, avoiding canvas taint issues
-    const blob=await fetch(dataURL).then(r=>r.blob());
-    const bmp=await createImageBitmap(blob);
-    let w=bmp.width,h=bmp.height;
-    if(w>maxDim||h>maxDim){
-      if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
-      else{w=Math.round(w*maxDim/h);h=maxDim;}
-    }
+  function drawAndEncode(source,w,h,q){
     const cv=document.createElement('canvas');
     cv.width=w;cv.height=h;
-    cv.getContext('2d').drawImage(bmp,0,0,w,h);
-    if(bmp.close)bmp.close();
-    return cv.toDataURL('image/jpeg',quality);
-  }catch(e){
-    console.warn('compressImage failed:',e.message,'; using original');
-    return dataURL;
+    cv.getContext('2d').drawImage(source,0,0,w,h);
+    return cv.toDataURL('image/jpeg',q);
   }
+  function calcDims(origW,origH,max){
+    if(origW<=max&&origH<=max)return[origW,origH];
+    return origW>origH
+      ?[max,Math.round(origH*max/origW)]
+      :[Math.round(origW*max/origH),max];
+  }
+
+  // Method 1: createImageBitmap (best for desktop Chrome with JPEG/PNG/WebP)
+  try{
+    const blob=await fetch(dataURL).then(r=>r.blob());
+    const bmp=await createImageBitmap(blob);
+    const[w,h]=calcDims(bmp.width,bmp.height,maxDim);
+    const result=drawAndEncode(bmp,w,h,quality);
+    if(bmp.close)bmp.close();
+    return result;
+  }catch(e){
+    console.warn('createImageBitmap failed:',e.message);
+  }
+
+  // Method 2: Image element (fallback)
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const[w,h]=calcDims(img.width,img.height,maxDim);
+        res(drawAndEncode(img,w,h,quality));
+      }catch(e2){
+        console.warn('Image element compress failed:',e2.message);
+        res(dataURL);
+      }
+    };
+    img.onerror=()=>{
+      console.warn('Image failed to load — unsupported format?');
+      res(dataURL);
+    };
+    img.src=dataURL;
+  });
 }
 
 // Compress for API: iteratively shrink until base64 is under ~400KB
@@ -1820,6 +1845,20 @@ async function compressForAPI(dataURL){
 async function processScanFiles(fileList){
   const files=Array.from(fileList);
   if(!files.length)return;
+
+  // Detect HEIC/HEIF — Chrome can't decode these; Safari can
+  const heicFiles=files.filter(f=>/heic|heif/i.test(f.type||f.name||''));
+  if(heicFiles.length){
+    scanForm={...scanForm,status:'error',errorMsg:
+      'HEIC photos from iPhone can\'t be read in Chrome.\n\n'+
+      'To fix: on your Mac, right-click the photo → Quick Actions → Convert Image → JPEG. '+
+      'Or open it in Photos → File → Export → Export 1 Photo → JPEG.\n\n'+
+      'Tip: On iPhone, go to Settings → Camera → Formats → Most Compatible to always save as JPEG.'
+    };
+    renderAdd();
+    return;
+  }
+
   const dataURLs=await Promise.all(files.map(fileToDataURL));
   const wasEmpty=scanForm.images.length===0;
   scanForm={...scanForm,status:'viewing',images:[...scanForm.images,...dataURLs],currentIdx:wasEmpty?0:scanForm.currentIdx};
@@ -1993,9 +2032,9 @@ function renderScanTab(){
       <div style="padding:24px 0 8px">
         <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px;margin-bottom:18px">
           <div style="font-size:.88rem;font-weight:700;color:#B91C1C;margin-bottom:4px">Could not read recipe</div>
-          <div style="font-size:.82rem;color:#7F1D1D;line-height:1.6">${escH(sf.errorMsg||'Unknown error')}</div>
+          <div style="font-size:.82rem;color:#7F1D1D;line-height:1.65">${escH(sf.errorMsg||'Unknown error').replace(/\n/g,'<br>')}</div>
         </div>
-        <button class="btn btn-terra btn-full" onclick="scanForm={...scanForm,status:'viewing'};renderAdd()" style="margin-bottom:10px">Try Again</button>
+        <button class="btn btn-terra btn-full" onclick="scanReset()" style="margin-bottom:10px">Try Again</button>
         <button class="btn btn-ghost btn-full" onclick="scanReset()">Start Over</button>
       </div>`;
   }
