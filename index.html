@@ -1688,7 +1688,7 @@ function resetForm(){state.addForm={...FORM_RESET};}
 // ═══════════════════════════════════════
 //  SCAN FROM PHOTO — Gemini Vision
 // ═══════════════════════════════════════
-const GEMINI_KEY=atob('QUl6YVN5Q2N1cC1wMWoyMnd1UW1NWVpnbkpYV0FZM3k1ZEdscHM4'); // ← paste your key here
+const GROQ_KEY=atob('Z3NrX3dIWXZBM0R3R3JSUU9yR1JqWWsyV0dkeWIzRll6UGlXYldreFBXYzJLWVR5OXpsR05Ea0I=');
 
 let scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};
 
@@ -1735,67 +1735,44 @@ async function processScanFiles(fileList){
   renderAdd();
 }
 
-async function discoverGeminiModel(){
-  try{
-    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
-    if(!r.ok){console.warn('ListModels HTTP',r.status);return null;}
-    const d=await r.json();
-    const all=(d.models||[])
-      .filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent'))
-      .map(m=>m.name.replace('models/',''));
-    console.log('All generateContent models:',all);
-    // Exclude text-only / embedding / legacy 1.0 models (no vision support)
-    const vision=all.filter(n=>!/embedding|aqa|text-bison|chat-bison|gemini-1\.0/i.test(n));
-    console.log('Vision candidates:',vision);
-    // Prefer cheapest/fastest free-tier vision model first
-    for(const pref of['flash-lite','2.0-flash','1.5-flash','flash','pro']){
-      const found=vision.find(n=>n.includes(pref));
-      if(found){console.log('Selected model:',found);return found;}
-    }
-    const fallback=vision[0]||all[0]||null;
-    console.log('Fallback model:',fallback);
-    return fallback;
-  }catch(e){console.warn('ListModels error:',e);return null;}
+const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct','llama-3.2-90b-vision-preview','llama-3.2-11b-vision-preview'];
+
+async function callGroq(images,prompt){
+  let lastErr='';
+  for(const model of GROQ_MODELS){
+    try{
+      console.log('→ Groq model:',model);
+      // Groq vision: one image per request — if multiple, send first then merge
+      const content=[
+        {type:'image_url',image_url:{url:images[0]}},
+        {type:'text',text:images.length>1
+          ?`There are ${images.length} pages of this recipe. This is page 1. ${prompt}`
+          :prompt}
+      ];
+      const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${GROQ_KEY}`},
+        body:JSON.stringify({model,messages:[{role:'user',content}],temperature:0.1,max_tokens:2048})
+      });
+      const json=await resp.json();
+      if(!resp.ok){console.warn(model,'error:',json?.error?.message);lastErr=json?.error?.message||`HTTP ${resp.status}`;continue;}
+      return json;
+    }catch(e){lastErr=e.message;console.warn(model,'exception:',e.message);}
+  }
+  throw new Error(lastErr||'All Groq models failed');
 }
 
-async function callGemini(model,body){
-  console.log('→ callGemini:',model);
-  const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
-  });
-  const json=await resp.json();
-  if(!resp.ok){
-    console.error('API error response:',JSON.stringify(json).substring(0,600));
-    throw new Error(json?.error?.message||`HTTP ${resp.status}`);
-  }
-  return json;
-}
-
-async function scanExtractWithGemini(){
-  if(!GEMINI_KEY||GEMINI_KEY==='YOUR_GEMINI_KEY_HERE'){
-    showToast('API key not configured — contact the app owner');return;
-  }
+async function scanExtractWithGroq(){
+  if(!GROQ_KEY){showToast('API key not configured — contact the app owner');return;}
   if(!scanForm.images.length){showToast('Add at least one photo first');return;}
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
-    // Compress images before sending to keep payload under API limits
     const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d)));
-    const imgParts=compressed.map(dataURL=>{
-      const mimeType=dataURL.split(';')[0].split(':')[1]||'image/jpeg';
-      const data=dataURL.split(',')[1]||'';
-      console.log('Image part — type:',mimeType,'data length:',data.length);
-      return{inlineData:{mimeType,data}};
-    });
-    const prompt=`Extract the complete recipe from these images. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:
+    const prompt=`Extract the complete recipe from this image. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:
 {"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}
-Include every ingredient and every step visible across all images.`;
-    const body={contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{temperature:0.1,maxOutputTokens:2048}};
-    // Discover which model to use, then call it
-    const model=await discoverGeminiModel();
-    if(!model) throw new Error('No compatible Gemini model found for this API key');
-    console.log('Using model:',model);
-    const data=await callGemini(model,body);
-    const raw=data.candidates?.[0]?.content?.parts?.[0]?.text||'';
+Include every ingredient and every step visible.`;
+    const data=await callGroq(compressed,prompt);
+    const raw=data.choices?.[0]?.message?.content||'';
     const jsonStr=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
     const recipe=JSON.parse(jsonStr);
     scanForm={
@@ -1836,7 +1813,7 @@ function renderScanTab(){
   const sf=scanForm;
   const n=sf.images.length;
   const idx=sf.currentIdx;
-  const keySet=GEMINI_KEY&&GEMINI_KEY!=='YOUR_GEMINI_KEY_HERE';
+  const keySet=!!GROQ_KEY;
 
   if(sf.status==='idle'){
     return`
@@ -1882,7 +1859,7 @@ function renderScanTab(){
       <img src="${img}" style="width:100%;border-radius:10px;margin-bottom:14px;max-height:340px;object-fit:contain;background:var(--bg-2)">
       <div style="display:flex;gap:10px;margin-bottom:10px">
         <button class="btn btn-ghost" onclick="scanAddMore()" style="flex:1">Add More Pages</button>
-        <button class="btn btn-terra" onclick="scanExtractWithGemini()" style="flex:2">Extract Recipe</button>
+        <button class="btn btn-terra" onclick="scanExtractWithGroq()" style="flex:2">Extract Recipe</button>
       </div>
       <button class="btn btn-ghost btn-full" onclick="scanReset()">Start Over</button>`;
   }
