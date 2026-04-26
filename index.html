@@ -1709,15 +1709,17 @@ function compressImage(dataURL,maxDim=1536,quality=0.85){
   return new Promise(res=>{
     const img=new Image();
     img.onload=()=>{
-      let w=img.width,h=img.height;
-      if(w>maxDim||h>maxDim){
-        if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
-        else{w=Math.round(w*maxDim/h);h=maxDim;}
-      }
-      const cv=document.createElement('canvas');
-      cv.width=w;cv.height=h;
-      cv.getContext('2d').drawImage(img,0,0,w,h);
-      res(cv.toDataURL('image/jpeg',quality));
+      try{
+        let w=img.width,h=img.height;
+        if(w>maxDim||h>maxDim){
+          if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
+          else{w=Math.round(w*maxDim/h);h=maxDim;}
+        }
+        const cv=document.createElement('canvas');
+        cv.width=w;cv.height=h;
+        cv.getContext('2d').drawImage(img,0,0,w,h);
+        res(cv.toDataURL('image/jpeg',quality));
+      }catch(e){res(dataURL);} // canvas taint fallback
     };
     img.onerror=()=>res(dataURL); // fallback: use original
     img.src=dataURL;
@@ -1734,32 +1736,38 @@ async function processScanFiles(fileList){
 }
 
 async function discoverGeminiModel(){
-  // Ask the API which models are actually available for this key
   try{
     const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_KEY}`);
-    if(!r.ok) return null;
+    if(!r.ok){console.warn('ListModels HTTP',r.status);return null;}
     const d=await r.json();
-    const available=(d.models||[])
+    const all=(d.models||[])
       .filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent'))
       .map(m=>m.name.replace('models/',''));
-    console.log('Available Gemini models:',available);
-    // Prefer flash models (fast + free tier); skip embedding/aqa/text-only models
-    const skip=/embedding|aqa|text-bison|chat-bison/i;
-    const prefer=['flash','pro'];
-    for(const p of prefer){
-      const found=available.find(m=>m.includes(p)&&!skip.test(m));
-      if(found) return found;
+    console.log('All generateContent models:',all);
+    // Exclude text-only / embedding / legacy 1.0 models (no vision support)
+    const vision=all.filter(n=>!/embedding|aqa|text-bison|chat-bison|gemini-1\.0/i.test(n));
+    console.log('Vision candidates:',vision);
+    // Prefer cheapest/fastest free-tier vision model first
+    for(const pref of['flash-lite','2.0-flash','1.5-flash','flash','pro']){
+      const found=vision.find(n=>n.includes(pref));
+      if(found){console.log('Selected model:',found);return found;}
     }
-    return available.find(m=>!skip.test(m))||null;
-  }catch(e){console.warn('ListModels failed:',e);return null;}
+    const fallback=vision[0]||all[0]||null;
+    console.log('Fallback model:',fallback);
+    return fallback;
+  }catch(e){console.warn('ListModels error:',e);return null;}
 }
 
 async function callGemini(model,body){
+  console.log('→ callGemini:',model);
   const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
   });
   const json=await resp.json();
-  if(!resp.ok) throw new Error(json?.error?.message||`HTTP ${resp.status}`);
+  if(!resp.ok){
+    console.error('API error response:',JSON.stringify(json).substring(0,600));
+    throw new Error(json?.error?.message||`HTTP ${resp.status}`);
+  }
   return json;
 }
 
@@ -1772,12 +1780,12 @@ async function scanExtractWithGemini(){
   try{
     // Compress images before sending to keep payload under API limits
     const compressed=await Promise.all(scanForm.images.map(d=>compressImage(d)));
-    const imgParts=compressed.map(dataURL=>({
-      inlineData:{
-        mimeType:'image/jpeg',
-        data:dataURL.split(',')[1]
-      }
-    }));
+    const imgParts=compressed.map(dataURL=>{
+      const mimeType=dataURL.split(';')[0].split(':')[1]||'image/jpeg';
+      const data=dataURL.split(',')[1]||'';
+      console.log('Image part — type:',mimeType,'data length:',data.length);
+      return{inlineData:{mimeType,data}};
+    });
     const prompt=`Extract the complete recipe from these images. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:
 {"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}
 Include every ingredient and every step visible across all images.`;
