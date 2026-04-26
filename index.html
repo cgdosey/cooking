@@ -1686,11 +1686,13 @@ function resetForm(){state.addForm={...FORM_RESET};}
 // ═══════════════════════════════════════
 //  SCAN FROM PHOTO (Tesseract OCR)
 // ═══════════════════════════════════════
-//  SCAN FROM PHOTO — Live Text / Google Lens workflow
+//  SCAN FROM PHOTO — Gemini Vision
 // ═══════════════════════════════════════
-let scanForm={status:'idle',images:[],currentIdx:0,pasteText:'',name:'',ingrText:'',steps:[]};
+const GEMINI_KEY=atob('QUl6YVN5QklPbC1DVUc4NWpHdEJ1MnZHNHl4SmgwSmc1YW9wekdZ'); // ← paste your key here
 
-function scanReset(){scanForm={status:'idle',images:[],currentIdx:0,pasteText:'',name:'',ingrText:'',steps:[]};renderAdd();}
+let scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};
+
+function scanReset(){scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};renderAdd();}
 function scanAddStep(){scanForm.steps.push({instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''});renderAdd();}
 function scanRemoveStep(i){scanForm.steps.splice(i,1);renderAdd();}
 function scanPrev(){if(scanForm.currentIdx>0){scanForm.currentIdx--;renderAdd();}}
@@ -1706,25 +1708,60 @@ async function processScanFiles(fileList){
   const files=Array.from(fileList);
   if(!files.length)return;
   const dataURLs=await Promise.all(files.map(fileToDataURL));
-  scanForm={...scanForm,status:'viewing',images:[...scanForm.images,...dataURLs],currentIdx:scanForm.images.length};
+  const wasEmpty=scanForm.images.length===0;
+  scanForm={...scanForm,status:'viewing',images:[...scanForm.images,...dataURLs],currentIdx:wasEmpty?0:scanForm.currentIdx};
   renderAdd();
 }
 
-function scanParseText(){
-  const text=document.getElementById('scan-paste')?.value.trim()||'';
-  scanForm.pasteText=text;
-  if(!text){showToast('Paste the recipe text first');return;}
-  const parsed=parseRecipeText(text);
-  // Pick name from first short non-section-header line
-  const firstLine=text.split('\n').map(l=>l.trim()).find(l=>l.length>2&&l.length<80&&!/^(ingredients?|method|instructions?|directions?|serves?|makes?)/i.test(l))||'Scanned Recipe';
-  scanForm={
-    ...scanForm,
-    status:'editing',
-    name:firstLine,
-    ingrText:parsed.ingredients.join('\n'),
-    steps:parsed.steps.length?parsed.steps:[{instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''}],
-  };
-  renderAdd();
+async function scanExtractWithGemini(){
+  if(!GEMINI_KEY||GEMINI_KEY==='YOUR_GEMINI_KEY_HERE'){
+    showToast('API key not configured — contact the app owner');return;
+  }
+  if(!scanForm.images.length){showToast('Add at least one photo first');return;}
+  scanForm={...scanForm,status:'loading'};renderAdd();
+  try{
+    const imgParts=scanForm.images.map(dataURL=>({
+      inline_data:{
+        mime_type:dataURL.split(';')[0].split(':')[1],
+        data:dataURL.split(',')[1]
+      }
+    }));
+    const prompt=`Extract the complete recipe from these images. Return ONLY a valid JSON object with exactly this structure, no markdown fences, no explanation:
+{"name":"Recipe Name","ingredients":["1 cup flour","2 eggs"],"steps":["Mix the dry ingredients.","Add eggs and stir well."]}
+Include every ingredient and every step visible across all images.`;
+    const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        contents:[{parts:[...imgParts,{text:prompt}]}],
+        generationConfig:{temperature:0.1,maxOutputTokens:2048}
+      })
+    });
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({}));
+      throw new Error(err?.error?.message||`HTTP ${resp.status}`);
+    }
+    const data=await resp.json();
+    const raw=data.candidates?.[0]?.content?.parts?.[0]?.text||'';
+    const jsonStr=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+    const recipe=JSON.parse(jsonStr);
+    scanForm={
+      ...scanForm,
+      status:'editing',
+      name:recipe.name||'Scanned Recipe',
+      ingrText:(recipe.ingredients||[]).join('\n'),
+      steps:(recipe.steps||[]).map(s=>({
+        instructions:s,timerMinutes:detectTimer(s),
+        title:summarizeStepTitle(s),phase:'',timerLabel:'',image:''
+      }))
+    };
+    if(!scanForm.steps.length) scanForm.steps=[{instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''}];
+    renderAdd();
+  }catch(e){
+    console.error('Gemini error:',e);
+    scanForm={...scanForm,status:'viewing'};renderAdd();
+    showToast('Could not read recipe — check your photos and try again');
+  }
 }
 
 function saveScanRecipe(){
@@ -1746,20 +1783,30 @@ function renderScanTab(){
   const sf=scanForm;
   const n=sf.images.length;
   const idx=sf.currentIdx;
+  const keySet=GEMINI_KEY&&GEMINI_KEY!=='YOUR_GEMINI_KEY_HERE';
 
   if(sf.status==='idle'){
     return`
       <input type="file" id="scan-file-input" accept="image/*" multiple style="display:none" onchange="processScanFiles(this.files)">
-      <div style="padding:24px 0 8px">
-        <div style="font-size:.92rem;font-weight:700;color:var(--text);margin-bottom:10px">How it works</div>
-        <div style="background:var(--bg-2);border-radius:12px;padding:14px 16px;font-size:.84rem;color:var(--text-2);line-height:1.8;margin-bottom:22px">
-          <div><strong style="color:var(--text)">1.</strong> Add one or more photos of the recipe</div>
-          <div><strong style="color:var(--text)">2.</strong> Use your phone to copy the text from the photo</div>
-          <div style="padding-left:18px;font-size:.78rem;color:var(--text-3)">iPhone/iPad: tap &amp; hold text → Select All → Copy</div>
-          <div style="padding-left:18px;font-size:.78rem;color:var(--text-3)">Android: long-press photo → Google Lens → Copy text</div>
-          <div><strong style="color:var(--text)">3.</strong> Paste into the text box and tap Extract</div>
+      <div style="padding:16px 0 8px">
+        ${!keySet?`<div style="background:#FFF8E1;border:1px solid #FFD54F;border-radius:10px;padding:12px 14px;font-size:.82rem;color:#5D4037;margin-bottom:16px;line-height:1.6">
+          API key not configured. Contact the app owner to enable photo scanning.
+        </div>`:''}
+        <div style="background:var(--bg-2);border-radius:12px;padding:14px 16px;font-size:.84rem;color:var(--text-2);line-height:1.95;margin-bottom:22px">
+          <div><strong style="color:var(--text)">1.</strong> Take or upload a photo of your recipe page</div>
+          <div><strong style="color:var(--text)">2.</strong> Add more photos if it spans multiple pages</div>
+          <div><strong style="color:var(--text)">3.</strong> Tap Extract — AI reads and organises it automatically</div>
         </div>
         <button class="btn btn-terra btn-full btn-lg" onclick="startScan()">Add Recipe Photo</button>
+      </div>`;
+  }
+
+  if(sf.status==='loading'){
+    return`
+      <div style="padding:56px 0;text-align:center">
+        <div class="url-spinner" style="margin:0 auto 18px;width:36px;height:36px;border-width:4px"></div>
+        <div style="font-size:1rem;font-weight:600;color:var(--text);margin-bottom:6px">Reading recipe…</div>
+        <div style="font-size:.85rem;color:var(--text-2)">AI is extracting ingredients and steps</div>
       </div>`;
   }
 
@@ -1773,27 +1820,18 @@ function renderScanTab(){
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <button class="ibtn" onclick="scanPrev()" style="opacity:${idx===0?.3:1}">${I.back}</button>
         <span style="font-size:.82rem;color:var(--text-3)">Photo ${idx+1} of ${n}</span>
-        <button class="ibtn" onclick="scanNext()" style="opacity:${idx===n-1?.3:1}" >${I.fwd||'›'}</button>
+        <button class="ibtn" onclick="scanNext()" style="opacity:${idx===n-1?.3:1}">${I.fwd||'›'}</button>
       </div>`:'';
     return`
       <input type="file" id="scan-more-input" accept="image/*" multiple style="display:none" onchange="processScanFiles(this.files)">
       ${thumbStrip}
       ${nav}
       <img src="${img}" style="width:100%;border-radius:10px;margin-bottom:14px;max-height:340px;object-fit:contain;background:var(--bg-2)">
-      <div style="background:var(--terra-bg);border:1px solid var(--terra-lt);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:.82rem;color:var(--terra-dk);line-height:1.75">
-        <strong>iPhone/iPad:</strong> tap &amp; hold any text in the photo → Select All → Copy<br>
-        <strong>Android:</strong> long-press the photo above → Google Lens → Copy text from image<br>
-        Then paste everything below. For multi-page recipes, repeat for each photo.
+      <div style="display:flex;gap:10px;margin-bottom:10px">
+        <button class="btn btn-ghost" onclick="scanAddMore()" style="flex:1">Add More Pages</button>
+        <button class="btn btn-terra" onclick="scanExtractWithGemini()" style="flex:2">Extract Recipe</button>
       </div>
-      <div class="field">
-        <label>Paste recipe text here</label>
-        <textarea class="input ta" id="scan-paste" rows="9" placeholder="Paste the copied text here…" style="font-size:15px">${escH(sf.pasteText)}</textarea>
-      </div>
-      <button class="btn btn-terra btn-full btn-lg" onclick="scanParseText()" style="margin-bottom:10px">Extract Recipe</button>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-ghost" onclick="scanAddMore()" style="flex:1">Add More Photos</button>
-        <button class="btn btn-ghost" onclick="scanReset()" style="flex:1">Start Over</button>
-      </div>`;
+      <button class="btn btn-ghost btn-full" onclick="scanReset()">Start Over</button>`;
   }
 
   if(sf.status==='editing'){
