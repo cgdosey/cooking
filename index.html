@@ -1842,24 +1842,37 @@ async function compressForAPI(dataURL){
   return compressImage(dataURL,200,0.25);
 }
 
+// Load heic2any on demand for HEIC→JPEG conversion
+async function loadHeic2Any(){
+  if(window.heic2any)return window.heic2any;
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js';
+    s.onload=()=>res(window.heic2any);
+    s.onerror=()=>rej(new Error('Could not load HEIC converter'));
+    document.head.appendChild(s);
+  });
+}
+
+async function normalizeFile(file){
+  const isHeic=/heic|heif/i.test(file.type||file.name||'');
+  if(!isHeic)return fileToDataURL(file);
+  try{
+    showToast('Converting HEIC to JPEG…');
+    const converter=await loadHeic2Any();
+    const jpegBlob=await converter({blob:file,toType:'image/jpeg',quality:0.9});
+    return fileToDataURL(jpegBlob);
+  }catch(e){
+    console.warn('HEIC conversion failed:',e.message);
+    // Fall back to original — compressImage will handle or surface the error
+    return fileToDataURL(file);
+  }
+}
+
 async function processScanFiles(fileList){
   const files=Array.from(fileList);
   if(!files.length)return;
-
-  // Detect HEIC/HEIF — Chrome can't decode these; Safari can
-  const heicFiles=files.filter(f=>/heic|heif/i.test(f.type||f.name||''));
-  if(heicFiles.length){
-    scanForm={...scanForm,status:'error',errorMsg:
-      'HEIC photos from iPhone can\'t be read in Chrome.\n\n'+
-      'To fix: on your Mac, right-click the photo → Quick Actions → Convert Image → JPEG. '+
-      'Or open it in Photos → File → Export → Export 1 Photo → JPEG.\n\n'+
-      'Tip: On iPhone, go to Settings → Camera → Formats → Most Compatible to always save as JPEG.'
-    };
-    renderAdd();
-    return;
-  }
-
-  const dataURLs=await Promise.all(files.map(fileToDataURL));
+  const dataURLs=await Promise.all(files.map(normalizeFile));
   const wasEmpty=scanForm.images.length===0;
   scanForm={...scanForm,status:'viewing',images:[...scanForm.images,...dataURLs],currentIdx:wasEmpty?0:scanForm.currentIdx};
   renderAdd();
