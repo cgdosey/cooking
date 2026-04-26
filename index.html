@@ -1686,7 +1686,7 @@ function resetForm(){state.addForm={...FORM_RESET};}
 // ═══════════════════════════════════════
 //  SCAN FROM PHOTO (Tesseract OCR)
 // ═══════════════════════════════════════
-//  SCAN FROM PHOTO — Gemini Vision
+//  SCAN FROM PHOTO — Groq Vision
 // ═══════════════════════════════════════
 const GROQ_KEY=atob('Z3NrX3dIWXZBM0R3R3JSUU9yR1JqWWsyV0dkeWIzRll6UGlXYldreFBXYzJLWVR5OXpsR05Ea0I=');
 
@@ -1738,11 +1738,11 @@ async function processScanFiles(fileList){
 const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct','llama-3.2-90b-vision-preview','llama-3.2-11b-vision-preview'];
 
 async function callGroq(images,prompt){
+  const key=GROQ_KEY;
   let lastErr='';
   for(const model of GROQ_MODELS){
     try{
       console.log('→ Groq model:',model);
-      // Groq vision: one image per request — if multiple, send first then merge
       const content=[
         {type:'image_url',image_url:{url:images[0]}},
         {type:'text',text:images.length>1
@@ -1751,7 +1751,7 @@ async function callGroq(images,prompt){
       ];
       const resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':`Bearer ${GROQ_KEY}`},
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
         body:JSON.stringify({model,messages:[{role:'user',content}],temperature:0.1,max_tokens:2048})
       });
       const json=await resp.json();
@@ -1763,7 +1763,7 @@ async function callGroq(images,prompt){
 }
 
 async function scanExtractWithGroq(){
-  if(!GROQ_KEY){showToast('API key not configured — contact the app owner');return;}
+  if(!GROQ_KEY){showToast('Photo scanning is not configured');return;}
   if(!scanForm.images.length){showToast('Add at least one photo first');return;}
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
@@ -1813,15 +1813,10 @@ function renderScanTab(){
   const sf=scanForm;
   const n=sf.images.length;
   const idx=sf.currentIdx;
-  const keySet=!!GROQ_KEY;
-
   if(sf.status==='idle'){
     return`
       <input type="file" id="scan-file-input" accept="image/*" multiple style="display:none" onchange="processScanFiles(this.files)">
       <div style="padding:16px 0 8px">
-        ${!keySet?`<div style="background:#FFF8E1;border:1px solid #FFD54F;border-radius:10px;padding:12px 14px;font-size:.82rem;color:#5D4037;margin-bottom:16px;line-height:1.6">
-          API key not configured. Contact the app owner to enable photo scanning.
-        </div>`:''}
         <div style="background:var(--bg-2);border-radius:12px;padding:14px 16px;font-size:.84rem;color:var(--text-2);line-height:1.95;margin-bottom:22px">
           <div><strong style="color:var(--text)">1.</strong> Take or upload a photo of your recipe page</div>
           <div><strong style="color:var(--text)">2.</strong> Add more photos if it spans multiple pages</div>
