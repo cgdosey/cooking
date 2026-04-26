@@ -1667,7 +1667,7 @@ function renderAdd(){
         <div class="add-tabs" style="margin-top:4px">
           <button class="add-tab ${state.addTab==='url'?'active':''}" onclick="setAddTab('url')">Import URL</button>
           <button class="add-tab ${state.addTab==='paste'?'active':''}" onclick="setAddTab('paste')">Paste Text</button>
-          <button class="add-tab ${state.addTab==='scan'?'active':''}" onclick="setAddTab('scan')">📸 Scan Photo</button>
+          <button class="add-tab ${state.addTab==='scan'?'active':''}" onclick="setAddTab('scan')">Scan Photo</button>
           <button class="add-tab ${state.addTab==='structured'?'active':''}" onclick="setAddTab('structured')">Manual</button>
         </div>
         ${state.addTab==='url'?urlTab:state.addTab==='paste'?pasteTab:state.addTab==='scan'?renderScanTab():structTab}
@@ -1686,9 +1686,9 @@ function resetForm(){state.addForm={...FORM_RESET};}
 // ═══════════════════════════════════════
 //  SCAN FROM PHOTO (Tesseract OCR)
 // ═══════════════════════════════════════
-let scanForm={status:'idle',progress:0,imageDataURL:null,name:'',ingrText:'',steps:[]};
+let scanForm={status:'idle',progress:0,currentPage:0,totalPages:0,images:[],name:'',ingrText:'',steps:[]};
 
-function scanReset(){scanForm={status:'idle',progress:0,imageDataURL:null,name:'',ingrText:'',steps:[]};renderAdd();}
+function scanReset(){scanForm={status:'idle',progress:0,currentPage:0,totalPages:0,images:[],name:'',ingrText:'',steps:[]};renderAdd();}
 function scanAddStep(){scanForm.steps.push({instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''});renderAdd();}
 function scanRemoveStep(i){scanForm.steps.splice(i,1);renderAdd();}
 
@@ -1710,38 +1710,139 @@ function updateScanProgress(p){
   if(txt)txt.textContent=p+'%';
 }
 
-async function processScanImage(file){
-  if(!file)return;
-  const reader=new FileReader();
-  reader.onload=async(e)=>{
-    const dataURL=e.target.result;
-    scanForm={...scanForm,status:'loading',progress:0,imageDataURL:dataURL};
-    renderAdd();
-    try{
-      // Lazy-load Tesseract.js from CDN (first use downloads ~4MB language data)
-      if(!window.Tesseract){
-        await loadScript('https://unpkg.com/tesseract.js@4/dist/tesseract.min.js');
-      }
-      const{data:{text}}=await Tesseract.recognize(dataURL,'eng',{
+// Read a File as a data URL
+function fileToDataURL(file){
+  return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsDataURL(file);});
+}
+
+async function processScanImages(fileList){
+  const files=Array.from(fileList);
+  if(!files.length)return;
+  // Convert all files to data URLs first
+  const dataURLs=await Promise.all(files.map(fileToDataURL));
+  scanForm={...scanForm,status:'loading',progress:0,currentPage:1,totalPages:files.length,images:dataURLs};
+  renderAdd();
+  try{
+    if(!window.Tesseract){
+      await loadScript('https://unpkg.com/tesseract.js@4/dist/tesseract.min.js');
+    }
+    // Process each page sequentially and accumulate text
+    let combinedText='';
+    for(let i=0;i<dataURLs.length;i++){
+      scanForm.currentPage=i+1;
+      scanForm.progress=0;
+      // Update label without full re-render
+      const lbl=document.getElementById('scan-page-lbl');
+      if(lbl)lbl.textContent=`Reading page ${i+1} of ${dataURLs.length}…`;
+      const{data:{text}}=await Tesseract.recognize(dataURLs[i],'eng',{
         logger:m=>{if(m.status==='recognizing text')updateScanProgress(Math.round(m.progress*100));}
       });
-      if(!text||text.trim().length<10){throw new Error('No readable text found in photo.');}
-      const parsed=parseRecipeText(text);
-      // Use first non-empty line as name candidate
-      const firstLine=text.split('\n').map(l=>l.trim()).find(l=>l.length>3&&l.length<80)||'Scanned Recipe';
-      scanForm={
-        ...scanForm,
-        status:'editing',
-        name:firstLine,
-        ingrText:parsed.ingredients.join('\n'),
-        steps:parsed.steps.length?parsed.steps:[{instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''}],
-      };
-    }catch(err){
-      scanForm={...scanForm,status:'error',errorMsg:err.message||'Could not read photo. Try a clearer, well-lit image.'};
+      combinedText+=(combinedText?'\n\n':'')+text;
     }
-    renderAdd();
-  };
-  reader.readAsDataURL(file);
+    if(!combinedText.trim()||combinedText.trim().length<10){throw new Error('No readable text found. Try a clearer, well-lit photo.');}
+    const parsed=parseOCRText(combinedText);
+    scanForm={
+      ...scanForm,
+      status:'editing',
+      name:parsed.name,
+      ingrText:parsed.ingredients.join('\n'),
+      steps:parsed.steps.length?parsed.steps:[{instructions:'',timerMinutes:null,title:'',phase:'',timerLabel:'',image:''}],
+    };
+  }catch(err){
+    scanForm={...scanForm,status:'error',errorMsg:err.message||'Could not read photo. Try a clearer, well-lit image.'};
+  }
+  renderAdd();
+}
+
+// OCR-specific parser — tuned for cookbook/magazine photo text
+function parseOCRText(raw){
+  // Fix common OCR measurement errors
+  let text=raw
+    .replace(/\bVz\b|\bV2\b/g,'1/2').replace(/\bVs\b|\bV3\b/g,'1/3').replace(/\bVa\b|\bV4\b/g,'1/4')
+    .replace(/(\d)\s*\/\s*(\d)/g,'$1/$2')
+    .replace(/^[-—]\s+/gm,'• ');
+
+  const lines=text.split('\n').map(l=>l.trim());
+
+  const isIngrHdr=l=>/^(ingredients?|for the [\w\s]+|what you'?ll? need|shopping list)\s*:?\s*$/i.test(l)||/^INGREDIENTS?\s*$/.test(l);
+  const isStepHdr=l=>/^(method|instructions?|directions?|steps?|how to(?: make| cook)?|preparation|procedure|to (make|cook|prepare))\s*:?\s*$/i.test(l)||/^(METHOD|INSTRUCTIONS?|DIRECTIONS?|PREPARATION)\s*$/.test(l);
+  const isSubHdr=l=>/^for (the )?[\w\s]{2,25}:?\s*$/i.test(l)&&l.length<40;
+  const isNoise=l=>/^(serves?|makes?|yield|prep time|cook time|total time|difficulty|calories|nutrition|per serving|source:|recipe from|adapted from)\s*[:—]/i.test(l);
+
+  let section='header';
+  let headerLines=[],ingrSections=[],curSection='',curItems=[],stepLines=[];
+
+  for(const line of lines){
+    if(!line||line.length<2)continue;
+    if(isIngrHdr(line)){
+      if(section!=='ingredients'&&headerLines.length&&!headerLines[0].match(/^(serves?|makes?)/i)){}
+      if(curItems.length){ingrSections.push({section:curSection,items:[...curItems]});curItems=[];curSection='';}
+      section='ingredients';continue;
+    }
+    if(isStepHdr(line)){
+      if(curItems.length){ingrSections.push({section:curSection,items:[...curItems]});curItems=[];curSection='';}
+      section='steps';continue;
+    }
+    if(section==='ingredients'&&isSubHdr(line)){
+      if(curItems.length){ingrSections.push({section:curSection,items:[...curItems]});curItems=[];}
+      curSection=line.replace(/:$/,'').trim();continue;
+    }
+    if(section==='header'){if(!isNoise(line))headerLines.push(line);}
+    else if(section==='ingredients'){const c=line.replace(/^[•\-*·✓]\s*/,'').trim();if(c.length>1)curItems.push(c);}
+    else if(section==='steps'){stepLines.push(line);}
+  }
+  if(curItems.length)ingrSections.push({section:curSection,items:curItems});
+
+  // Fallback: no sections found — classify lines by heuristic
+  if(ingrSections.length===0&&stepLines.length===0){
+    const ingrFb=[],stepFb=[];
+    let ingrMode=false,stepMode=false;
+    for(const line of lines){
+      if(!line||line.length<2)continue;
+      if(isIngrHdr(line)){ingrMode=true;stepMode=false;continue;}
+      if(isStepHdr(line)){stepMode=true;ingrMode=false;continue;}
+      if(!ingrMode&&!stepMode){
+        if(looksLikeIngredient(line)){ingrMode=true;ingrFb.push(line.replace(/^[•\-*]\s*/,''));}
+        else if(looksLikeCookingStep(line)){stepMode=true;stepFb.push(line);}
+      }else if(ingrMode){
+        if(looksLikeCookingStep(line)&&!looksLikeIngredient(line)){stepMode=true;ingrMode=false;stepFb.push(line);}
+        else ingrFb.push(line.replace(/^[•\-*]\s*/,''));
+      }else{stepFb.push(line);}
+    }
+    if(ingrFb.length)ingrSections.push({section:'',items:ingrFb});
+    stepLines=stepFb;
+  }
+
+  // Extract name: first non-noise header line under 80 chars
+  const name=headerLines.find(l=>l.length>2&&l.length<80&&!isNoise(l))||'Scanned Recipe';
+
+  // Parse steps: join continuation lines, split on numbers or blank lines
+  const stepsText=stepLines.join('\n');
+  let rawSteps=[];
+  if(/^\s*\d+[.)]/m.test(stepsText)){
+    rawSteps=stepsText.split(/\n\s*\d+[.)]\s*/).map(s=>s.replace(/\n/g,' ').trim()).filter(s=>s.length>15);
+  }else{
+    // Join lines into paragraphs; start new paragraph when line starts with capital after content
+    let cur='';
+    for(const line of stepLines){
+      if(!line){if(cur.trim()){rawSteps.push(cur.trim());cur='';}}
+      else if(/^[A-Z]/.test(line)&&cur.length>30){rawSteps.push(cur.trim());cur=line;}
+      else{cur+=(cur?' ':'')+line;}
+    }
+    if(cur.trim())rawSteps.push(cur.trim());
+  }
+
+  const steps=rawSteps.filter(s=>s.length>15).map(s=>{
+    const inst=s.replace(/^(step\s*\d+[:\.\-]?\s*)/i,'').trim();
+    return{phase:'',title:summarizeStepTitle(inst),instructions:inst,timerMinutes:detectTimer(inst),timerLabel:'',image:''};
+  });
+
+  const ingredients=ingrSections.flatMap(s=>s.items).filter(Boolean);
+  return{name,ingredients,steps};
+}
+
+function looksLikeIngredient(line){
+  return /^[\d¼½¾⅓⅔⅛][\d\/\s¼½¾⅓⅔⅛]*\s*(g|kg|ml|l|cups?|tbsps?|tsps?|oz|lbs?|large|medium|small|cloves?|bunch|slices?|piece|pinch|dash|handful|can|pkg|stick)/i.test(line.trim());
 }
 
 function saveScanRecipe(){
@@ -1749,7 +1850,6 @@ function saveScanRecipe(){
   if(!name){showToast('Please enter a recipe name');return;}
   const ingrText=document.getElementById('scan-ingr')?.value.trim()||'';
   const ingredients=ingrText?[{section:'Ingredients',items:ingrText.split('\n').map(l=>l.trim()).filter(Boolean)}]:[];
-  // Read step textareas
   const stepEls=document.querySelectorAll('#scan-steps-list .scan-step-ta');
   const steps=Array.from(stepEls).map(el=>{
     const inst=el.value.trim();
@@ -1762,32 +1862,34 @@ function saveScanRecipe(){
 
 function renderScanTab(){
   const sf=scanForm;
+  const thumbs=sf.images.length?`<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px">${sf.images.map((u,i)=>`<img src="${u}" style="height:70px;min-width:52px;object-fit:cover;border-radius:8px;border:2px solid ${i===sf.currentPage-1?'var(--terra)':'var(--border)'}">`).join('')}</div>`:'';
+
   if(sf.status==='idle'){
-    return`<input type="file" id="scan-file-input" accept="image/*" style="display:none" onchange="processScanImage(this.files[0])">
+    return`<input type="file" id="scan-file-input" accept="image/*" multiple style="display:none" onchange="processScanImages(this.files)">
       <div style="text-align:center;padding:32px 16px 24px">
-        <div style="font-size:3.5rem;margin-bottom:14px">📸</div>
         <div style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:8px">Scan a Recipe</div>
         <div style="font-size:.84rem;color:var(--text-2);margin-bottom:28px;line-height:1.65">
-          Take a photo of a recipe from a book, magazine, or handwritten card.<br>Best results with clear, well-lit, flat photos.
+          Take a photo of a recipe from a book or magazine.<br>Select multiple photos if the recipe spans more than one page.<br>Best results with clear, well-lit, flat photos.
         </div>
-        <button class="btn btn-terra btn-full btn-lg" onclick="startScan()">📷 Choose Photo or Take Picture</button>
+        <button class="btn btn-terra btn-full btn-lg" onclick="startScan()">Choose Photo or Take Picture</button>
         <div style="font-size:.75rem;color:var(--text-3);margin-top:14px;line-height:1.5">First use downloads ~4 MB of language data</div>
       </div>`;
   }
   if(sf.status==='loading'){
-    return`<div style="text-align:center;padding:32px 16px">
-      ${sf.imageDataURL?`<img src="${sf.imageDataURL}" style="max-width:100%;max-height:180px;border-radius:10px;margin-bottom:20px;object-fit:contain">`:''}
-      <div style="font-size:1rem;font-weight:700;margin-bottom:6px">Reading recipe…</div>
-      <div style="font-size:.84rem;color:var(--text-2);margin-bottom:20px">Extracting text from your photo</div>
-      <div style="background:var(--bg-2);border-radius:8px;height:10px;overflow:hidden;margin-bottom:8px">
-        <div id="scan-progress-bar" style="background:var(--terra);height:100%;width:${sf.progress}%;transition:width .3s;border-radius:8px"></div>
+    return`<div style="padding:24px 0">
+      ${thumbs}
+      <div style="text-align:center">
+        <div id="scan-page-lbl" style="font-size:1rem;font-weight:700;margin-bottom:6px">Reading page ${sf.currentPage} of ${sf.totalPages}…</div>
+        <div style="font-size:.84rem;color:var(--text-2);margin-bottom:20px">Extracting text from your photo</div>
+        <div style="background:var(--bg-2);border-radius:8px;height:10px;overflow:hidden;margin-bottom:8px">
+          <div id="scan-progress-bar" style="background:var(--terra);height:100%;width:${sf.progress}%;transition:width .3s;border-radius:8px"></div>
+        </div>
+        <div id="scan-progress-txt" style="font-size:.8rem;color:var(--text-3)">${sf.progress}%</div>
       </div>
-      <div id="scan-progress-txt" style="font-size:.8rem;color:var(--text-3)">${sf.progress}%</div>
     </div>`;
   }
   if(sf.status==='error'){
     return`<div style="text-align:center;padding:32px 16px">
-      <div style="font-size:3rem;margin-bottom:14px">⚠️</div>
       <div style="font-size:1rem;font-weight:700;margin-bottom:8px">Couldn't read the photo</div>
       <div style="font-size:.84rem;color:var(--text-2);margin-bottom:24px">${escH(sf.errorMsg||'Try a clearer, well-lit photo.')}</div>
       <button class="btn btn-terra btn-full" onclick="scanReset()">Try Again</button>
@@ -1795,9 +1897,9 @@ function renderScanTab(){
   }
   if(sf.status==='editing'){
     return`<div>
-      ${sf.imageDataURL?`<img src="${sf.imageDataURL}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px;margin-bottom:16px">`:''}
+      ${thumbs}
       <div class="url-status" style="margin-bottom:14px;background:var(--terra-bg);color:var(--terra-dk);border-color:var(--terra-lt)">
-        ✅ Text extracted — review and edit below before saving
+        Text extracted — review and edit below before saving
       </div>
       <div class="field">
         <label>Recipe Name</label>
@@ -1820,7 +1922,7 @@ function renderScanTab(){
       </div>
       <button class="add-step-btn" onclick="scanAddStep()">${I.plus} Add Step</button>
       <div style="display:flex;gap:10px;margin-top:4px">
-        <button class="btn btn-ghost" onclick="scanReset()" style="flex:1">Try Again</button>
+        <button class="btn btn-ghost" onclick="scanReset()" style="flex:1">Start Over</button>
         <button class="btn btn-terra" onclick="saveScanRecipe()" style="flex:2">Save Recipe</button>
       </div>
     </div>`;
