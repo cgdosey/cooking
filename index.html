@@ -442,6 +442,18 @@
     .confirm-btns{display:flex;flex-direction:column;gap:10px;}
     /* ── ADD RECIPE ── */
     .add-page{padding:0 18px 32px;}
+    /* ── ACCORDION ── */
+    .accordion{border:1.5px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:12px;}
+    .accordion summary{
+      list-style:none;display:flex;align-items:center;justify-content:space-between;
+      padding:13px 16px;cursor:pointer;font-weight:700;font-size:.92rem;
+      background:var(--bg);-webkit-tap-highlight-color:transparent;
+    }
+    .accordion summary::-webkit-details-marker{display:none;}
+    .accordion summary .acc-right{display:flex;align-items:center;gap:8px;color:var(--text-3);font-size:.8rem;font-weight:500;}
+    .accordion summary .acc-chevron{transition:transform .2s;font-size:.7rem;color:var(--text-3);}
+    .accordion[open] summary .acc-chevron{transform:rotate(180deg);}
+    .accordion-body{padding:10px 16px 14px;border-top:1.5px solid var(--border);background:var(--bg-2);}
     .add-tabs{
       display:flex;gap:3px;background:var(--bg-2);border-radius:10px;padding:3px;margin-bottom:20px;
     }
@@ -2629,7 +2641,26 @@ async function tryJina(url){
   if(!r.ok)throw new Error(`Jina ${r.status}`);
   const t=await r.text();
   if(t.length<200)throw new Error('Jina empty response');
-  return t;
+  return cleanJinaMarkdown(t);
+}
+// Strip Jina's metadata envelope (Title:, Published Time:, MARKDOWN CONTENT, SEARCH FOR, etc.)
+function cleanJinaMarkdown(text){
+  // Jina prepends metadata lines before the actual content under "MARKDOWN CONTENT"
+  const mdSectionRx=/\bMARKDOWN\s+CONTENT\b/i;
+  const m=text.match(mdSectionRx);
+  if(m){
+    let content=text.substring(m.index+m[0].length).trim();
+    // Cut off anything after trailing section headers like "SEARCH FOR", "LINKS", "IMAGES" etc.
+    const trailerRx=/\n(?:SEARCH\s+FOR|LINKS|IMAGES|SIMILAR|RELATED|COMMENTS)\b/i;
+    const t=content.search(trailerRx);
+    if(t>400)content=content.substring(0,t);
+    return content;
+  }
+  // No envelope — strip leading metadata key:value lines (Title:, Published Time:, etc.)
+  const lines=text.split('\n');
+  let start=0;
+  while(start<lines.length&&/^(?:title|url|published|updated|author|source|description)\s*:/i.test(lines[start].trim()))start++;
+  return lines.slice(start).join('\n').trim()||text;
 }
 
 // Isolate the recipe card section from a full page markdown dump
@@ -3028,89 +3059,29 @@ function closePreview(){
   state.view='add';render();
 }
 
-// Stage metadata edits from the details screen into previewData, then show full recipe preview
-function stageAndPreviewFull(){
-  const name=document.getElementById('preview-name')?.value.trim();
-  if(!name){showToast('Please enter a recipe name');return;}
-  const p=state.previewData;
-  p.name=name;
-  p.prepTime=document.getElementById('pv-prep')?.value.trim()||'';
-  p.cookTime=document.getElementById('pv-cook')?.value.trim()||'';
-  p.totalTime=document.getElementById('pv-total')?.value.trim()||'';
-  p.course=document.getElementById('pv-course')?.value||'';
-  p.cuisine=document.getElementById('pv-cuisine')?.value.trim()||'';
-  p.yield=document.getElementById('pv-servings')?.value.trim()||p.yield||'';
-  p.calories=document.getElementById('pv-calories')?.value.trim()||'';
-  p.notes=document.getElementById('pv-notes')?.value.trim()||'';
-  state.view='fullpreview';render();
-}
-
-function closeFullPreview(){
-  state.view='preview';render();
-}
-
-function renderFullPreview(){
-  const p=state.previewData;
-  if(!p){go('add');return;}
-  const allIngr=(p.ingredients||[]).flatMap(s=>s.items||[]);
-  const sectionCount=(p.ingredients||[]).filter(s=>s.items&&s.items.length).length;
-  const ingrHTML=(p.ingredients||[]).map(sec=>{
-    const hdr=sectionCount>1&&!/^ingredients$/i.test(sec.section||'')
-      ?`<div style="font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);margin:12px 0 4px;padding-top:4px">${escH(sec.section)}</div>`
-      :'';
-    return hdr+(sec.items||[]).map(item=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.9rem;color:var(--text-1)">${escH(item)}</div>`).join('');
-  }).join('');
-  const stepsHTML=(p.steps||[]).map((s,i)=>`
-    <div style="margin-bottom:14px;background:var(--bg-2);border-radius:12px;padding:14px 16px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${s.instructions?'8':'0'}px">
-        <span style="background:var(--terra);color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0">${i+1}</span>
-        ${s.title?`<span style="font-weight:600;font-size:.9rem">${escH(s.title)}</span>`:''}
-        ${s.timerMinutes?`<span style="margin-left:auto;background:var(--terra-bg,#FFF5F0);color:var(--terra);font-size:.74rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap">${s.timerMinutes} min</span>`:''}
-      </div>
-      ${s.instructions?`<div style="font-size:.9rem;line-height:1.7;color:var(--text-1)">${escH(s.instructions)}</div>`:''}
-    </div>`).join('');
-  document.getElementById('app').innerHTML=`
-    <div class="shell">
-      <div class="topbar"><div class="topbar-row">
-        <button class="ibtn" onclick="closeFullPreview()">${I.back}</button>
-        <div class="topbar-title" style="font-size:1.05rem">Recipe Preview</div>
-        <div style="width:40px"></div>
-      </div></div>
-      <div class="add-page" style="padding-bottom:110px">
-        ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:18px" onerror="this.remove()">`:''}
-        <div style="font-size:1.25rem;font-weight:800;letter-spacing:-.3px;margin-bottom:12px">${escH(p.name)}</div>
-        ${allIngr.length?`
-        <div class="slabel" style="margin-bottom:8px">${allIngr.length} Ingredient${allIngr.length!==1?'s':''}${sectionCount>1?` <span style="font-weight:400;text-transform:none;font-size:.76rem;color:var(--text-3)">· ${sectionCount} sections</span>`:''}</div>
-        <div style="background:var(--bg-2);border-radius:12px;padding:10px 16px 6px;margin-bottom:20px">${ingrHTML}</div>`:''}
-        <div class="slabel" style="margin-bottom:10px">${(p.steps||[]).length} Step${(p.steps||[]).length!==1?'s':''}</div>
-        ${stepsHTML}
-        ${p.notes?`<div class="slabel" style="margin-top:6px;margin-bottom:8px">Notes</div><div style="background:var(--bg-2);border-radius:12px;padding:14px 16px;font-size:.9rem;line-height:1.8;white-space:pre-wrap;margin-bottom:20px">${escH(p.notes)}</div>`:''}
-        <button class="btn btn-terra btn-full btn-lg" style="margin-top:12px" onclick="saveFromPreview()">Save Recipe</button>
-        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closeFullPreview()">← Back to Details</button>
-      </div>
-    </div>`;
-}
 
 function saveFromPreview(){
   const p=state.previewData;
-  if(!p||!p.name){showToast('Please enter a recipe name');return;}
+  if(!p){showToast('No recipe to save');return;}
+  const name=(document.getElementById('preview-name')?.value||'').trim()||p.name||'';
+  if(!name){showToast('Please enter a recipe name');return;}
   recipes.push({
     id:nextId++,
-    name:p.name,
+    name,
     description:p.description||'',
     image:p.image||'',
-    yield:p.yield||'',
+    yield:(document.getElementById('pv-servings')?.value||'').trim()||p.yield||'',
     difficulty:p.difficulty||'Intermediate',
     cookware:p.cookware||[],
     ingredients:p.ingredients||[],
     steps:(p.steps||[]).map(s=>({...s})),
-    prepTime:p.prepTime||'',
-    cookTime:p.cookTime||'',
-    totalTime:p.totalTime||'',
-    course:p.course||'',
-    cuisine:p.cuisine||'',
-    calories:p.calories||'',
-    notes:p.notes||''
+    prepTime:(document.getElementById('pv-prep')?.value||'').trim()||'',
+    cookTime:(document.getElementById('pv-cook')?.value||'').trim()||'',
+    totalTime:(document.getElementById('pv-total')?.value||'').trim()||'',
+    course:document.getElementById('pv-course')?.value||'',
+    cuisine:(document.getElementById('pv-cuisine')?.value||'').trim()||'',
+    calories:(document.getElementById('pv-calories')?.value||'').trim()||'',
+    notes:(document.getElementById('pv-notes')?.value||'').trim()||''
   });
   saveRecipes();
   resetForm();
@@ -3159,30 +3130,28 @@ Rules:
 function renderPreview(){
   const p=state.previewData;
   if(!p){go('add');return;}
-  // Kick off background estimation for any missing fields
   estimateMissingMeta(p);
   const allIngr=(p.ingredients||[]).flatMap(s=>s.items||[]);
   const sectionCount=(p.ingredients||[]).filter(s=>s.items&&s.items.length).length;
 
   const ingrHTML=(p.ingredients||[]).map(sec=>{
     const hdr=sectionCount>1&&!/^ingredients$/i.test(sec.section||'')
-      ?`<div style="font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);margin:12px 0 4px;padding-top:4px">${escH(sec.section)}</div>`
-      :'';
-    return hdr+(sec.items||[]).map(item=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.9rem;color:var(--text-1)">${escH(item)}</div>`).join('');
+      ?`<div style="font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);margin:10px 0 4px">${escH(sec.section)}</div>`:'';
+    return hdr+(sec.items||[]).map(item=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.9rem">${escH(item)}</div>`).join('');
   }).join('');
 
   const stepsHTML=(p.steps||[]).map((s,i)=>`
-    <div style="margin-bottom:14px;background:var(--bg-2);border-radius:12px;padding:14px 16px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${s.instructions?'8':'0'}px">
-        <span style="background:var(--terra);color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0">${i+1}</span>
-        ${s.title?`<span style="font-weight:600;font-size:.9rem;color:var(--text)">${escH(s.title)}</span>`:''}
-        ${s.timerMinutes?`<span style="margin-left:auto;background:var(--terra-bg,#FFF5F0);color:var(--terra);font-size:.74rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap">${s.timerMinutes} min</span>`:''}
+    <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <span style="background:var(--terra);color:#fff;border-radius:50%;width:24px;height:24px;min-width:24px;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;margin-top:2px">${i+1}</span>
+      <div>
+        ${s.title?`<div style="font-weight:600;font-size:.88rem;margin-bottom:3px">${escH(s.title)}</div>`:''}
+        ${s.instructions?`<div style="font-size:.88rem;line-height:1.65;color:var(--text-1)">${escH(s.instructions)}</div>`:''}
+        ${s.timerMinutes?`<span style="display:inline-block;margin-top:4px;background:var(--terra-bg);color:var(--terra);font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:20px">${s.timerMinutes} min</span>`:''}
       </div>
-      ${s.instructions?`<div style="font-size:.9rem;line-height:1.7;color:var(--text-1)">${escH(s.instructions)}</div>`:''}
     </div>`).join('');
 
   const courseOpts=['','Breakfast','Brunch','Lunch','Dinner','Dessert','Snack','Appetizer','Side Dish','Soup','Salad','Main Course'];
-  const mkField=(id,label,val,ph='')=>`<div class="field"><label>${label}</label><input class="input" id="${id}" value="${escH(val)}" placeholder="${ph}"/></div>`;
+  const mkField=(id,label,val,ph='')=>`<div class="field"><label>${label}</label><input class="input" id="${id}" value="${escH(val)}" placeholder="${ph||label}"/></div>`;
   const mkSelect=(id,label,val)=>`<div class="field"><label>${label}</label><select class="input" id="${id}">${courseOpts.map(o=>`<option value="${o}"${o===val?' selected':''}>${o||'Select…'}</option>`).join('')}</select></div>`;
 
   document.getElementById('app').innerHTML=`
@@ -3193,21 +3162,21 @@ function renderPreview(){
         <div style="width:40px"></div>
       </div></div>
       <div class="add-page" style="padding-bottom:110px">
-        ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:18px" onerror="this.remove()">`:''}
+        ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:16px" onerror="this.remove()">`:''}
 
-        <div class="field" style="margin-bottom:4px">
+        <div class="field">
           <label>Recipe Name</label>
           <input class="input" id="preview-name" value="${escH(p.name)}" placeholder="Recipe name"/>
         </div>
 
-        <div class="slabel" style="margin:18px 0 10px">Timing</div>
+        <div class="slabel" style="margin:16px 0 8px">Timing</div>
         <div class="two-col">
-          ${mkField('pv-prep','Prep Time',p.prepTime,'e.g. 15 min')}
-          ${mkField('pv-cook','Cook Time',p.cookTime,'e.g. 30 min')}
+          ${mkField('pv-prep','Prep Time',p.prepTime,'15 min')}
+          ${mkField('pv-cook','Cook Time',p.cookTime,'30 min')}
         </div>
-        ${mkField('pv-total','Total Time',p.totalTime,'e.g. 45 min')}
+        ${mkField('pv-total','Total Time',p.totalTime,'45 min')}
 
-        <div class="slabel" style="margin:18px 0 10px">Details</div>
+        <div class="slabel" style="margin:16px 0 8px">Details</div>
         <div class="two-col">
           ${mkSelect('pv-course','Course',p.course)}
           ${mkField('pv-cuisine','Cuisine',p.cuisine,'e.g. Italian')}
@@ -3217,18 +3186,24 @@ function renderPreview(){
           ${mkField('pv-calories','Calories / Serving',p.calories,'e.g. 320')}
         </div>
 
+        ${allIngr.length?`
+        <details class="accordion" style="margin-top:16px">
+          <summary>Ingredients<span class="acc-right">${allIngr.length} item${allIngr.length!==1?'s':''}${sectionCount>1?` · ${sectionCount} sections`:''}<span class="acc-chevron">▼</span></span></summary>
+          <div class="accordion-body">${ingrHTML}</div>
+        </details>`:''}
+
+        ${(p.steps||[]).length?`
+        <details class="accordion">
+          <summary>Steps<span class="acc-right">${(p.steps||[]).length} step${(p.steps||[]).length!==1?'s':''}<span class="acc-chevron">▼</span></span></summary>
+          <div class="accordion-body">${stepsHTML}</div>
+        </details>`:''}
+
         <div class="field" style="margin-top:4px">
-          <label>Notes</label>
-          <textarea class="input ta" id="pv-notes" rows="3" placeholder="Storage tips, substitutions, make-ahead notes…">${escH(p.notes||'')}</textarea>
+          <label>Chef's Notes</label>
+          <textarea class="input ta" id="pv-notes" rows="3" placeholder="Recipe tips, storage, substitutions…">${escH(p.notes||'')}</textarea>
         </div>
 
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 4px">
-          ${allIngr.length?`<span class="meta-chip">${allIngr.length} ingredient${allIngr.length!==1?'s':''}</span>`:''}
-          ${(p.steps||[]).length?`<span class="meta-chip">${(p.steps||[]).length} step${(p.steps||[]).length!==1?'s':''}</span>`:''}
-          ${sectionCount>1?`<span class="meta-chip">${sectionCount} ingredient sections</span>`:''}
-        </div>
-
-        <button class="btn btn-terra btn-full btn-lg" style="margin-top:16px" onclick="stageAndPreviewFull()">Preview Recipe →</button>
+        <button class="btn btn-terra btn-full btn-lg" style="margin-top:20px" onclick="saveFromPreview()">Save Recipe</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePreview()">← Back to Edit</button>
       </div>
     </div>`;
@@ -3244,7 +3219,6 @@ function render(){
   if(state.view==='detail'){renderDetail();return;}
   if(state.view==='add'){renderAdd();return;}
   if(state.view==='preview'){renderPreview();return;}
-  if(state.view==='fullpreview'){renderFullPreview();return;}
   if(state.tab==='shoplist'){renderShopList();return;}
   if(state.tab==='timers'){renderTimers();return;}
   renderList();
