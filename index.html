@@ -19,9 +19,14 @@
       ctx.fillStyle='#D4705A';
       ctx.beginPath();ctx.roundRect(0,0,W,H,112);ctx.fill();
       ctx.fillStyle='#ffffff';
-      ctx.font='700 310px -apple-system,"Helvetica Neue",Arial,sans-serif';
-      ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText('K',W/2+4,H/2+8);
+      ctx.font='800 280px -apple-system,"Helvetica Neue",Arial,sans-serif';
+      ctx.textAlign='left';ctx.textBaseline='middle';
+      // Back R — slightly dimmer, shifted down-right
+      ctx.globalAlpha=0.55;
+      ctx.fillText('R',W*0.28,H*0.56);
+      // Front R — full opacity, shifted up-left
+      ctx.globalAlpha=1;
+      ctx.fillText('R',W*0.14,H*0.44);
       const link=document.createElement('link');
       link.rel='apple-touch-icon';link.href=c.toDataURL('image/png');
       document.head.appendChild(link);
@@ -85,7 +90,23 @@
       backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
     }
     .topbar-row{display:flex;align-items:center;justify-content:space-between;}
-    .topbar-title{font-size:1.5rem;font-weight:800;letter-spacing:-.5px;}
+    .topbar-brand{display:flex;align-items:center;gap:9px;}
+    .topbar-logo{
+      width:30px;height:30px;border-radius:8px;
+      background:var(--terra);
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;overflow:hidden;
+    }
+    .topbar-logo svg{width:30px;height:30px;}
+    .topbar-wordmark{font-size:1.1rem;font-weight:800;letter-spacing:-.3px;color:var(--text-1);}
+    .topbar-add{
+      width:34px;height:34px;border-radius:50%;border:none;
+      background:var(--terra);color:#fff;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+      -webkit-tap-highlight-color:transparent;transition:background .15s;flex-shrink:0;
+    }
+    .topbar-add:hover{background:var(--terra-dk);}
+    .topbar-add svg{width:18px;height:18px;}
     /* ── SEARCH WRAP ── */
     .search-wrap{position:relative;}
     .search-box{
@@ -123,25 +144,38 @@
     .btn-full{width:100%;}
     .btn-lg{height:54px;font-size:.95rem;border-radius:14px;}
     /* ── RECIPE CARDS ── */
-    .card-list{padding:16px 16px 0;display:flex;flex-direction:column;gap:14px;}
+    .card-list{padding:12px 16px 0;display:flex;flex-direction:column;gap:10px;}
     .recipe-card{
-      background:var(--bg);border-radius:18px;overflow:hidden;
-      box-shadow:0 2px 6px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.07);
+      background:var(--bg);border-radius:14px;overflow:hidden;
+      border:1.5px solid var(--border);
+      display:flex;flex-direction:row;align-items:stretch;
       cursor:pointer;-webkit-tap-highlight-color:transparent;
       transition:transform .15s;
     }
     .recipe-card:active{transform:scale(.985);}
-    .rc-img{width:100%;height:190px;object-fit:cover;display:block;background:var(--terra-bg);}
+    .rc-img{
+      width:88px;min-height:88px;flex-shrink:0;
+      object-fit:cover;display:block;background:var(--terra-bg);
+    }
     .rc-img-ph{
-      width:100%;height:190px;
+      width:88px;min-height:88px;flex-shrink:0;
       background:linear-gradient(135deg,#F5EDE8,#EBD8D1);
       display:flex;align-items:center;justify-content:center;
-      font-size:4.5rem;font-weight:800;color:rgba(212,112,90,.18);letter-spacing:-2px;
+      font-size:2rem;font-weight:800;color:rgba(212,112,90,.35);
     }
-    .rc-body{padding:14px 16px 16px;}
-    .rc-name{font-size:1.05rem;font-weight:700;margin-bottom:5px;letter-spacing:-.2px;}
-    .rc-meta{display:flex;align-items:center;gap:5px;color:var(--text-3);font-size:.82rem;}
-    .rc-meta svg{width:13px;height:13px;flex-shrink:0;}
+    .rc-body{
+      padding:12px 14px;flex:1;min-width:0;
+      display:flex;flex-direction:column;justify-content:center;gap:4px;
+    }
+    .rc-name{font-size:1rem;font-weight:700;letter-spacing:-.2px;line-height:1.3;margin:0;}
+    .rc-meta{display:flex;align-items:center;gap:5px;color:var(--text-3);font-size:.8rem;margin:0;}
+    .rc-meta svg{width:12px;height:12px;flex-shrink:0;}
+    .rc-chip{
+      display:inline-block;margin-top:2px;align-self:flex-start;
+      background:var(--terra-bg);color:var(--terra);
+      font-size:.72rem;font-weight:700;letter-spacing:.2px;
+      padding:2px 8px;border-radius:99px;
+    }
     /* ── DETAIL ── */
     .detail-img{width:100%;height:240px;object-fit:cover;display:block;background:var(--terra-bg);}
     .detail-img-ph{
@@ -1190,11 +1224,13 @@ function cardsHTML(q){
   return visible.length?visible.map(r=>{
     const ho=hoText(r);
     const img=r.image?`<img class="rc-img" src="${escH(r.image)}" alt="${escH(r.name)}" onerror="this.outerHTML='<div class=rc-img-ph>${escH(r.name.charAt(0))}</div>'">`:`<div class="rc-img-ph">${escH(r.name.charAt(0))}</div>`;
+    const metaStr=[ho||r.totalTime,r.yield].filter(Boolean).join(' · ');
     return`<div class="recipe-card" onclick="go('detail',{id:${r.id}})">
       ${img}
       <div class="rc-body">
         <div class="rc-name">${escH(r.name)}</div>
-        <div class="rc-meta">${I.clock} ${ho||r.totalTime||r.difficulty||''}${r.yield?` &nbsp;·&nbsp; ${escH(r.yield)}`:''}</div>
+        ${metaStr?`<div class="rc-meta">${I.clock} ${escH(metaStr)}</div>`:''}
+        ${r.difficulty?`<span class="rc-chip">${escH(r.difficulty)}</span>`:''}
       </div>
     </div>`;
   }).join(''):(q?`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No results</h3><p>No recipes match "${escH(q)}".</p></div>`:`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No recipes yet</h3><p>Import from URL or add one manually.</p></div>`);
@@ -1211,8 +1247,11 @@ function renderList(){
     <div class="shell">
       <div class="topbar">
         <div class="topbar-row">
-          <div class="topbar-title">Recipe Ripper</div>
-          <button class="ibtn" onclick="go('add')" aria-label="Add">${I.plus}</button>
+          <div class="topbar-brand">
+            <div class="topbar-logo"><svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><text x="6" y="17" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="rgba(255,255,255,0.5)">R</text><text x="12" y="24" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="#ffffff">R</text></svg></div>
+            <span class="topbar-wordmark">Recipe Ripper</span>
+          </div>
+          <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
         </div>
         <div style="padding:6px 0 4px">
           <input class="input search-box" id="search-input" type="text" dir="ltr" inputmode="search" placeholder="Search recipes…" oninput="setSearch(this.value)">
@@ -1995,7 +2034,8 @@ async function scanExtractWithGroq(){
 Extract the COMPLETE recipe. Do not skip, summarise, or reorder anything.
 
 Rules:
-- If the ingredients are grouped into sections (e.g. "For the dough", "For the sauce", "Topping"), preserve those sections exactly
+- Extract ALL ingredients listed before the instructions, even if there is no "Ingredients" heading — they may just appear as a plain list at the top
+- If ingredients are grouped into sections (e.g. "For the dough", "For the sauce", "Topping"), preserve those sections exactly
 - Include ALL ingredients with exact quantities (e.g. "450g strong bread flour", "1¼ tsp fine sea salt")
 - Include ALL steps in the correct order with complete text
 - Steps must follow the numbered/ordered sequence shown
@@ -2003,7 +2043,7 @@ Rules:
 Return ONLY this JSON, nothing else, no markdown:
 {"name":"Recipe Name","ingredients":[{"section":"For the Dough","items":["450g flour","7g yeast"]},{"section":"For the Sauce","items":["2 tbsp olive oil"]}],"steps":["Full step 1.","Full step 2."]}
 
-If there is only one ingredient group with no section heading, use: {"section":"Ingredients","items":[...]}
+If there is only one ingredient group (with or without a heading), use: {"section":"Ingredients","items":[...]}
 
 Important: ignore any photos or images within the recipe — only extract text (name, ingredients, steps).`;
 
@@ -2221,8 +2261,8 @@ function parseRecipeText(text){
   text=text.replace(/^#{1,6}\s+/gm,'').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/\*([^*]+)\*/g,'$1').replace(/^[-*]\s+/gm,'• ');
 
   // Detect ingredient & instruction sections
-  const ingrRx=/^(?:ingredients?|what you'?ll? need|shopping list)[:\s]*/im;
-  const stepsRx=/^(?:instructions?|directions?|method|steps?|how to make|preparation|procedure|for the|to make)[:\s]*/im;
+  const ingrRx=/^(?:ingredients?|what you'?ll? need|what you need|you'?ll? need|you will need|shopping list|gather(?:ed)?|for this recipe)[:\s]*/im;
+  const stepsRx=/^(?:instructions?|directions?|method|steps?|how to make|preparation|procedure|for the|to make|to assemble)[:\s]*/im;
   const notesRx=/^(?:notes?|tips?|nutrition(?:al)?(?: info(?:rmation)?)?|storage|serving suggestions?|make ahead|equipment|video)[:\s]*/im;
 
   const ingrIdx=text.search(ingrRx);
@@ -2240,8 +2280,26 @@ function parseRecipeText(text){
     stepsText=text.slice(stepsIdx,notesIdx>stepsIdx?notesIdx:undefined);
     ingrText=text.slice(0,stepsIdx);
   }else{
-    // No clear sections — try to split on first cooking verb paragraph
-    stepsText=text;
+    // No labelled sections — heuristic: find first clearly step-like line and treat everything before it as ingredients
+    const stepStartRx=/\b(?:preheat|heat (?:the|a|your|oven)|add (?:the|to|all)|mix (?:the|together|until|well)|stir (?:in|together|until)|combine (?:the|all)|cook (?:for|the|until|over)|bake (?:for|at|until)|roast|grill|fry|boil|simmer|sauté|saute|pour|place (?:the|in|on)|put (?:the|in|on)|cover (?:and|with)|remove (?:the|from)|transfer|fold in|whisk|knead|chop|dice|slice|mince|season (?:with|to)|serve|let cool|drain|brush|spread|sprinkle|beat (?:the|until)|blend|bring to|reduce|toss|brown|sear)\b/i;
+    const numberedStepRx=/^\d+[.\)]\s+[A-Z]/;
+    const metaLineRx=/^(?:prep|cook|total|yield|serves?|servings?|difficulty|author|source|by |from |via |makes?|time:|course:|cuisine:)/i;
+    const allLines=text.split('\n').map(l=>l.trim()).filter(l=>l.length>2);
+    let firstStepIdx=-1;
+    for(let i=0;i<allLines.length;i++){
+      const l=allLines[i];
+      if((stepStartRx.test(l)&&l.length>35)||numberedStepRx.test(l)){firstStepIdx=i;break;}
+    }
+    if(firstStepIdx>0){
+      // Filter out metadata lines from the pre-step block to get cleaner ingredients
+      const preLines=allLines.slice(0,firstStepIdx).filter(l=>
+        l.length<160&&!metaLineRx.test(l)
+      );
+      if(preLines.length)ingrText=preLines.join('\n');
+      stepsText=allLines.slice(firstStepIdx).join('\n');
+    }else{
+      stepsText=text;
+    }
   }
 
   // Parse ingredients with section detection
@@ -2670,7 +2728,7 @@ async function fetchFromURL(){
           const fb=parseRecipeText(bodyText);
           fallbackSteps=fb.steps;
           if(!parsed.ingredients.length&&fb.ingredients.length)
-            parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
+            parsed.ingredients=fb.ingredients;
         }
         parsed.steps=fallbackSteps;
       }
@@ -2683,7 +2741,7 @@ async function fetchFromURL(){
           cleanDoc(doc);
           const bodyText=docBodyText(doc);
           const fb=parseRecipeText(bodyText);
-          if(fb.ingredients.length)parsed.ingredients=[{section:'Ingredients',items:fb.ingredients}];
+          if(fb.ingredients.length)parsed.ingredients=fb.ingredients;
         }
       }
       state.addForm.urlStatus=parsed.steps.length?'success':'partial';
@@ -2701,7 +2759,7 @@ async function fetchFromURL(){
       if(bodyText.length<200)throw new Error('The page content could not be read. The site may require JavaScript or block automated access. Try copying the recipe text and using Paste Text instead.');
       const fb=parseRecipeText(bodyText);
       const finalSteps=domSteps.length>=fb.steps.length?domSteps:fb.steps;
-      const finalIngr=domIngr.length?domIngr:(fb.ingredients.length?[{section:'Ingredients',items:fb.ingredients}]:[]);
+      const finalIngr=domIngr.length?domIngr:fb.ingredients;
       state.addForm.urlParsed={name:pageTitle,description:metaDesc,image:ogImage,yield:'',difficulty:'Intermediate',cookware:[],ingredients:finalIngr,steps:finalSteps};
       state.addForm.urlStatus=finalSteps.length?'partial':'error';
       state.addForm.urlError=finalSteps.length?'No structured recipe found — extracted from page text. Please review the steps carefully.':'No recipe content detected. The site may block automated access. Try copying the text and using Paste Text.';
