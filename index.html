@@ -1263,7 +1263,7 @@ function renderList(){
         <div class="topbar-row">
           <div class="topbar-brand">
             <div class="topbar-logo"><svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><text x="6" y="17" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="rgba(255,255,255,0.5)">R</text><text x="12" y="24" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="#ffffff">R</text></svg></div>
-            <span class="topbar-wordmark">Recipe Ripper</span><span style="font-size:.6rem;color:var(--text-3);font-weight:500;margin-left:4px">v27</span>
+            <span class="topbar-wordmark">Recipe Ripper</span><span style="font-size:.6rem;color:var(--text-3);font-weight:500;margin-left:4px">v28</span>
           </div>
           <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
         </div>
@@ -2415,8 +2415,7 @@ function parseRecipeText(text){
 
   // Filter steps: must look like actual cooking instructions
   const validSteps=rawSteps.filter(s=>looksLikeCookingStep(s));
-  // If filter removes everything, fall back to all steps (better than nothing)
-  const finalSteps=(validSteps.length>=1?validSteps:rawSteps).slice(0,40);
+  const finalSteps=validSteps.slice(0,40);
 
   const parsedSteps=finalSteps.map(chunk=>{
     const instructions=chunk.replace(/^(?:step\s*\d+[:\.\-]?\s*)/i,'').trim();
@@ -2839,10 +2838,19 @@ async function fetchFromURL(){
       if(recipe&&(recipe.steps||[]).length>=2){
         stageGroq(recipe);
       }else{
+        // Groq couldn't find real steps — try the regex text parser as last resort
         const parsed=parseMarkdownRecipe(html,url);
-        state.addForm.urlParsed=parsed;
-        state.addForm.urlStatus=parsed.steps.length?'success':'partial';
-        state.addForm.urlError=parsed.steps.length?'':'Recipe found but steps could not be extracted. Try Paste Text.';
+        if(parsed.steps.length>=2){
+          state.addForm.urlParsed=parsed;
+          state.addForm.urlStatus='success';
+          state.addForm.urlError='';
+        }else{
+          // Nothing worked — the recipe card content isn't accessible from this site.
+          // Show an error rather than garbage.
+          state.addForm.urlStatus='error';
+          state.addForm.urlError='This site\'s recipe couldn\'t be extracted automatically (the recipe card may be loaded by JavaScript). Please copy the recipe text from the page and use the Paste Text tab instead.';
+          renderAdd();return;
+        }
       }
       jumpToPreview('url');return;
     }
