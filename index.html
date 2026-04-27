@@ -18,15 +18,17 @@
       const W=512,H=512;
       ctx.fillStyle='#D4705A';
       ctx.beginPath();ctx.roundRect(0,0,W,H,112);ctx.fill();
+      // Mirror the SVG topbar logo exactly (viewBox 0 0 30 30, font-size 17)
+      // Scale factor: 512/30 = 17.07
+      const scale=W/30;
+      ctx.textAlign='left';ctx.textBaseline='alphabetic';
+      ctx.font=`800 ${Math.round(17*scale)}px -apple-system,"Helvetica Neue",Arial,sans-serif`;
+      // Back R: SVG x=6 y=17, opacity 0.5
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.fillText('R',6*scale,17*scale);
+      // Front R: SVG x=12 y=24, opacity 1
       ctx.fillStyle='#ffffff';
-      ctx.font='800 280px -apple-system,"Helvetica Neue",Arial,sans-serif';
-      ctx.textAlign='left';ctx.textBaseline='middle';
-      // Back R — slightly dimmer, shifted down-right
-      ctx.globalAlpha=0.55;
-      ctx.fillText('R',W*0.28,H*0.56);
-      // Front R — full opacity, shifted up-left
-      ctx.globalAlpha=1;
-      ctx.fillText('R',W*0.14,H*0.44);
+      ctx.fillText('R',12*scale,24*scale);
       const link=document.createElement('link');
       link.rel='apple-touch-icon';link.href=c.toDataURL('image/png');
       document.head.appendChild(link);
