@@ -2588,6 +2588,25 @@ async function tryJina(url){
   return t;
 }
 
+// Use Groq to extract a recipe from plain text/markdown (text-only, no image)
+async function groqExtractFromText(text){
+  const prompt=`Extract the complete recipe from the text below. Return ONLY this JSON, nothing else, no markdown fences:
+{"name":"Recipe Name","yield":"4 servings","description":"Brief description","ingredients":[{"section":"Ingredients","items":["2 cups flour","1 tsp salt"]},{"section":"For the Sauce","items":["1 cup tomatoes"]}],"steps":["Full step 1 text.","Full step 2 text."]}
+
+Rules:
+- Include ALL ingredients with exact quantities
+- If ingredients are grouped into sections (e.g. "For the Corn Stock:", "For the Chowder:"), use a separate section object for each
+- Include ALL steps in order with their full text
+- Put serving/yield info (e.g. "Serves 8") in the yield field, NOT in ingredients
+- Do not include rating, author, or comments in the output
+
+TEXT:
+${text.substring(0,12000)}`;
+  const data=await callGroq([],prompt);
+  const raw=data.choices?.[0]?.message?.content||'';
+  return parseGroqJSON(raw);
+}
+
 // Parse Jina markdown into a recipe object
 function parseMarkdownRecipe(md,url){
   // Extract title from first H1 or H2
@@ -2620,12 +2639,23 @@ async function fetchFromURL(){
         throw new Error('Could not fetch the page. The site may block automated access. Try copying the recipe text and using Paste Text instead.');
       }
     }
-    // Jina path: parse markdown directly, no DOM/JSON-LD
+    // Jina path: use Groq for best extraction, fall back to markdown parser
     if(useJina){
-      const parsed=parseMarkdownRecipe(html,url);
-      state.addForm.urlParsed=parsed;
-      state.addForm.urlStatus=parsed.steps.length?'success':'partial';
-      state.addForm.urlError=parsed.steps.length?'':'Recipe found but steps could not be extracted. Try Paste Text.';
+      let recipe=null;
+      try{recipe=await groqExtractFromText(html);}catch(e){}
+      if(recipe&&(recipe.steps||[]).length>=2){
+        const ingrs=Array.isArray(recipe.ingredients)?recipe.ingredients:[];
+        const steps=(recipe.steps||[]).map(s=>{const tm=detectTimer(s);return{phase:'',title:summarizeStepTitle(s),instructions:s,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};});
+        // Extract image from markdown
+        const imgM=html.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
+        state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:imgM?imgM[1]:'',yield:recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps};
+        state.addForm.urlStatus='success';state.addForm.urlError='';
+      }else{
+        const parsed=parseMarkdownRecipe(html,url);
+        state.addForm.urlParsed=parsed;
+        state.addForm.urlStatus=parsed.steps.length?'success':'partial';
+        state.addForm.urlError=parsed.steps.length?'':'Recipe found but steps could not be extracted. Try Paste Text.';
+      }
       renderAdd();return;
     }
     const doc=new DOMParser().parseFromString(html,'text/html');
@@ -2775,13 +2805,30 @@ async function fetchFromURL(){
       state.addForm.urlError=parsed.steps.length?'':'Recipe info found but steps could not be extracted. Try Paste Text.';
       state.addForm.urlParsed=parsed;
     }else{
-      // No JSON-LD found from HTML proxy — try Jina for JS-rendered content before falling back
+      // No JSON-LD found from HTML proxy — try Jina + Groq before falling back to DOM parsing
       if(!useJina){
         try{
           const jinaMd=await tryJina(url);
-          const jinaResult=parseMarkdownRecipe(jinaMd,url);
-          if(jinaResult.steps.length>=2){
-            state.addForm.urlParsed=jinaResult;
+          const ogImage=doc.querySelector('meta[property="og:image"]')?.content||'';
+          let recipe=null;
+          // First try Groq on Jina markdown — most reliable
+          try{recipe=await groqExtractFromText(jinaMd);}catch(e){}
+          // If Groq failed or returned no steps, fall back to text parser on the markdown
+          if(!recipe||(recipe.steps||[]).length<2){
+            const jinaResult=parseMarkdownRecipe(jinaMd,url);
+            if(jinaResult.steps.length>=2){
+              state.addForm.urlParsed=jinaResult;
+              state.addForm.urlStatus='success';
+              state.addForm.urlError='';
+              renderAdd();return;
+            }
+          }else{
+            const ingrs=Array.isArray(recipe.ingredients)?recipe.ingredients:[];
+            const steps=(recipe.steps||[]).map(s=>{
+              const tm=detectTimer(s);
+              return{phase:'',title:summarizeStepTitle(s),instructions:s,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};
+            });
+            state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:ogImage,yield:recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps};
             state.addForm.urlStatus='success';
             state.addForm.urlError='';
             renderAdd();return;
