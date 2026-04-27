@@ -2035,10 +2035,12 @@ Extract the COMPLETE recipe. Do not skip, summarise, or reorder anything.
 
 Rules:
 - Extract ALL ingredients listed before the instructions, even if there is no "Ingredients" heading — they may just appear as a plain list at the top
+- IMPORTANT: Many cookbook pages use a TWO-COLUMN layout where the LEFT column lists the ingredients (sometimes only labeled "Serves X" or with no heading at all) and the RIGHT column contains the cooking instructions. If you see this layout, carefully extract the left column as ingredients and the right column as steps — do NOT mix them together.
 - If ingredients are grouped into sections (e.g. "For the dough", "For the sauce", "Topping"), preserve those sections exactly
 - Include ALL ingredients with exact quantities (e.g. "450g strong bread flour", "1¼ tsp fine sea salt")
 - Include ALL steps in the correct order with complete text
 - Steps must follow the numbered/ordered sequence shown
+- "Serves X", "Makes X", yield information, and serving size labels are NOT ingredients — do not include them in the ingredients list
 
 Return ONLY this JSON, nothing else, no markdown:
 {"name":"Recipe Name","ingredients":[{"section":"For the Dough","items":["450g flour","7g yeast"]},{"section":"For the Sauce","items":["2 tbsp olive oil"]}],"steps":["Full step 1.","Full step 2."]}
