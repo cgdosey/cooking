@@ -2693,41 +2693,60 @@ function stripJunkLines(text){
 
 // Isolate the recipe card section from a full page markdown dump
 function extractRecipeSection(text){
-  // Most recipe sites: recipe card appears after the blog post
-  // Look for an Ingredients heading (## Ingredients, **Ingredients**, etc.)
-  const ingrHdRx=/\n(?:#{1,4}\s*|(?:\*{1,2})?)ingredients?(?:\*{1,2})?\s*\n/i;
-  const m=text.match(ingrHdRx);
+  // Strategy 1: Find any recipe card heading — Ingredients, Instructions, Directions, Method, Steps
+  // Matches both markdown headings (## Ingredients) and plain uppercase (INGREDIENTS)
+  const recipeHdRx=/\n(?:#{1,4}\s*|\*{1,2})?(?:ingredients?|instructions?|directions?|method|steps?)(?:\*{1,2})?\s*\n/i;
+  const m=text.match(recipeHdRx);
   if(m){
-    // Take from just before Ingredients heading up to 7000 chars
-    const start=Math.max(0,m.index-200);
-    return text.substring(start,start+7000);
+    // Start 600 chars before the heading to capture recipe name, yield, times
+    const start=Math.max(0,m.index-600);
+    return text.substring(start,start+8000);
   }
-  // No heading found — use the last 7000 chars (recipe cards are usually near the end)
-  return text.length>7000?text.substring(text.length-7000):text;
+
+  // Strategy 2: Look for numbered cooking steps pattern (1. Do something with at least 20 chars)
+  // This catches recipe cards where the section heading is missing but the steps are still there
+  const numberedRx=/\n1\.\s+[A-Z].{20,}/;
+  const nm=text.match(numberedRx);
+  if(nm){
+    const start=Math.max(0,nm.index-1000);
+    return text.substring(start,start+8000);
+  }
+
+  // Strategy 3: Look for bullet ingredient pattern (- 1 cup something / • 2 tbsp)
+  const bulletIngrRx=/\n[-•]\s+\d[\d\/\s]*(?:cup|tbsp?|tsp?|oz|lb|g|kg|ml|l|clove|can|bunch|pinch)/i;
+  const bm=text.match(bulletIngrRx);
+  if(bm){
+    const start=Math.max(0,bm.index-400);
+    return text.substring(start,start+8000);
+  }
+
+  // Final fallback: last 8000 chars (recipe cards are usually near the end of the page)
+  return text.length>8000?text.substring(text.length-8000):text;
 }
 
 // Use Groq to extract a recipe from plain text/markdown (text-only, no image)
 async function groqExtractFromText(text){
   const section=extractRecipeSection(text);
-  const prompt=`You are extracting data from a RECIPE CARD section of a food blog page. The text below is only the recipe card — ignore any surrounding blog narrative, tips, or stories.
+  const prompt=`You are a recipe extraction engine. Extract the structured recipe from the text below. The text is from a food blog recipe card — ignore any surrounding blog narrative, tips, author bios, or site footer text.
 
-Extract the structured recipe. Return ONLY this JSON, nothing else, no markdown fences:
-{"name":"Recipe Name","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min","course":"Dinner","cuisine":"American","servings":"8 people","calories":"320","description":"One sentence description","notes":"Any recipe notes or tips","ingredients":[{"section":"For the Corn Stock","items":["4 cups chicken broth","1½ cups milk"]},{"section":"For the Chowder","items":["2 tbsp butter","3 ears corn"]}],"steps":["Step 1 full text.","Step 2 full text."]}
+Return ONLY this JSON (no markdown fences, no extra text):
+{"name":"Recipe Name","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min","course":"Dinner","cuisine":"American","servings":"4 servings","calories":"320","description":"One sentence description.","notes":"Chef tips or storage notes here.","ingredients":[{"section":"","items":["2 tbsp olive oil","3 cloves garlic, minced"]},{"section":"For the sauce","items":["1 cup broth","1 tbsp butter"]}],"steps":["Preheat oven to 400°F. Line a baking sheet with parchment.","Mix together the yogurt, lemon juice, and olive oil in a bowl. Set aside."]}
 
 Rules:
-- ingredients: only actual food items with quantities — NOT tips, blog text, or meta info
-- steps: only real cooking instructions (numbered steps) — NOT tips, Q&A, storage notes, or blog prose
-- If ingredients have section headers (e.g. "For the Corn Stock:", "For the Chowder:"), preserve them as separate sections
-- servings: serving size like "8 people" or "4 servings"
-- prepTime/cookTime/totalTime: values like "15 min", "1 hr 30 min" — extract if present, otherwise estimate from the recipe
-- course: one of Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Appetizer, Side Dish, Soup, Salad — infer if not stated
-- cuisine: e.g. "American", "Italian" — infer if not stated
-- calories: per-serving calorie count as a number string only, e.g. "320"
-- notes: any recipe notes, tips, make-ahead info, storage instructions found in the recipe
-- Omit any step that is a tip, blog aside, or meta information (e.g. "How to remove corn silk", "cool summer nights", "Prep Time: 15 mins")
-- NEVER include markdown links, email addresses, URLs, or social media text as steps or ingredients
+- ingredients: actual food items with measurements ONLY — no headings, no tips, no blog text
+- ingredients sections: use section:"" for unsectioned ingredients; use section name (e.g. "For the marinade") when the recipe groups them
+- steps: each step must be a real cooking action — a complete instruction sentence or paragraph. Steps often start with a verb (Preheat, Mix, Add, Cook, Stir, Roast, etc.)
+- steps must NOT be: the recipe name, site taglines, author names, markdown links, email addresses, URLs, social text, or tips
+- steps format: some sites format steps as "Title – instruction text" — include the full text as the step
+- If you cannot find clear numbered/bulleted steps, look for paragraphs that describe cooking actions
+- servings: e.g. "4 servings" or "8 people"
+- prepTime/cookTime/totalTime: e.g. "15 min", "1 hr 30 min" — extract if stated, estimate if not
+- course: one of Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Appetizer, Side Dish, Soup, Salad
+- cuisine: e.g. "American", "Italian", "Mediterranean"
+- calories: per-serving number only, e.g. "320"
+- notes: recipe tips, make-ahead info, storage — from the recipe card only, not blog prose
 
-RECIPE CARD TEXT:
+RECIPE TEXT:
 ${section}`;
   const data=await callGroq([],prompt);
   const raw=data.choices?.[0]?.message?.content||'';
