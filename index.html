@@ -1970,50 +1970,31 @@ async function scanExtractWithGroq(){
       console.warn('Ping failed (non-fatal):',e.message);
     }
 
-    // Compress each image, iterating until under 500KB
+    // Compress all images — send together so AI sees the full recipe context
     const compressed=await Promise.all(scanForm.images.map(d=>compressForAPI(d)));
-    const singlePrompt=`You are reading a recipe. Read EVERY word carefully — do not skip or summarise anything.
+    const n=compressed.length;
+    const prompt=`You are a recipe extraction assistant. ${n>1?`These are ${n} pages of the same recipe, in order.`:'This is a recipe.'} Read EVERY word on ${n>1?'all pages':'the image'} carefully — ingredients list, step numbers, quantities, everything.
 
-Extract the COMPLETE recipe. Include:
-- The exact recipe name
-- ALL ingredients with their exact quantities and units (e.g. "450g bread flour", "2 tsp salt") — do not skip any
-- ALL steps in full — copy the complete instruction text for each step, do not truncate
+Your task: extract the COMPLETE recipe exactly as written. Do not skip, summarise, or reorder anything.
 
-Return ONLY a valid JSON object, no markdown, no explanation, nothing else:
-{"name":"Full Recipe Name","ingredients":["450g bread flour","2 tsp fine sea salt","7g instant yeast"],"steps":["Complete text of step 1.","Complete text of step 2."]}`;
+Rules:
+- Include ALL ingredients with exact quantities (e.g. "450g strong bread flour", "1¼ tsp fine sea salt")
+- Include ALL steps in the correct order, with complete text — do not split one step into multiple or merge steps
+- The steps must follow the numbered/ordered sequence shown in the image(s)
 
-    const extraPrompt=`This is another page of the same recipe. Read every word carefully.
+Return ONLY this JSON, nothing else, no markdown fences:
+{"name":"Full Recipe Name","ingredients":["quantity + ingredient, one per item"],"steps":["Full text of step 1 exactly as written.","Full text of step 2 exactly as written."]}`;
 
-Extract any ingredients and steps shown on THIS page that are not already captured. Return ONLY valid JSON:
-{"name":"","ingredients":["exact quantity and ingredient for anything new"],"steps":["Complete text of each new step shown on this page."]}`;
-
-
-    // Process images one at a time to avoid payload limits
-    let merged={name:'',ingredients:[],steps:[]};
-    for(let i=0;i<compressed.length;i++){
-      const prompt=i===0?singlePrompt:extraPrompt;
-      const data=await callGroq([compressed[i]],prompt);
-      const raw=data.choices?.[0]?.message?.content||'';
-      const page=parseGroqJSON(raw);
-      if(i===0){
-        merged.name=page.name||'Scanned Recipe';
-        merged.ingredients=[...(page.ingredients||[])];
-        merged.steps=[...(page.steps||[])];
-      }else{
-        // Merge additional pages — deduplicate by text similarity
-        (page.ingredients||[]).forEach(ing=>{
-          if(!merged.ingredients.some(x=>x.toLowerCase()===ing.toLowerCase()))merged.ingredients.push(ing);
-        });
-        merged.steps=[...merged.steps,...(page.steps||[])];
-      }
-    }
+    const data=await callGroq(compressed,prompt);
+    const raw=data.choices?.[0]?.message?.content||'';
+    const recipe=parseGroqJSON(raw);
 
     scanForm={
       ...scanForm,
       status:'editing',
-      name:merged.name,
-      ingrText:merged.ingredients.join('\n'),
-      steps:merged.steps.map(s=>({
+      name:recipe.name||'Scanned Recipe',
+      ingrText:(recipe.ingredients||[]).join('\n'),
+      steps:(recipe.steps||[]).map(s=>({
         instructions:s,timerMinutes:detectTimer(s),
         title:summarizeStepTitle(s),phase:'',timerLabel:'',image:''
       }))
