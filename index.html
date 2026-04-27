@@ -2677,10 +2677,23 @@ async function fetchFromURL(){
       renderAdd();return;
     }
     const doc=new DOMParser().parseFromString(html,'text/html');
-    // Try all JSON-LD blocks
+    // Try JSON-LD: regex on raw HTML first (more reliable with proxy-fetched HTML where
+    // DOMParser may mangle script tag contents or decode HTML entities inside JSON)
     let node=null;
-    for(const script of doc.querySelectorAll('script[type="application/ld+json"]')){
-      try{node=findRecipeNode(JSON.parse(script.textContent));if(node)break;}catch(e){}
+    const ldRx=/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let ldMatch;
+    while(!node&&(ldMatch=ldRx.exec(html))!==null){
+      try{
+        // Unescape any HTML entities the proxy may have encoded inside the script block
+        const raw=ldMatch[1].replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+        node=findRecipeNode(JSON.parse(raw));
+      }catch(e){}
+    }
+    // DOMParser fallback if regex found nothing
+    if(!node){
+      for(const script of doc.querySelectorAll('script[type="application/ld+json"]')){
+        try{node=findRecipeNode(JSON.parse(script.textContent));if(node)break;}catch(e){}
+      }
     }
     // Remove chrome elements from doc for clean text extraction
     function cleanDoc(d){
