@@ -2693,35 +2693,36 @@ function stripJunkLines(text){
 
 // Isolate the recipe card section from a full page markdown dump
 function extractRecipeSection(text){
-  // Strategy 1: Find any recipe card heading — Ingredients, Instructions, Directions, Method, Steps
-  // Matches both markdown headings (## Ingredients) and plain uppercase (INGREDIENTS)
-  const recipeHdRx=/\n(?:#{1,4}\s*|\*{1,2})?(?:ingredients?|instructions?|directions?|method|steps?)(?:\*{1,2})?\s*\n/i;
-  const m=text.match(recipeHdRx);
-  if(m){
-    // Start 600 chars before the heading to capture recipe name, yield, times
-    const start=Math.max(0,m.index-600);
-    return text.substring(start,start+8000);
+  const CHUNK=10000;
+
+  // Short text — send it all, no need to slice
+  if(text.length<=CHUNK)return text;
+
+  // Try anchors from most-to-least specific. Each anchor strongly indicates we're near the recipe card.
+  const anchors=[
+    // Prep/Cook time labels — almost always immediately adjacent to the recipe card
+    /\bprep(?:aration)?\s+time\s*:?\s*\d/i,
+    /\bcook\s+time\s*:?\s*\d/i,
+    // Recipe card section headings (markdown or plain, with optional colon/bold)
+    /\n(?:#{1,4}\s*|\*{0,2})(?:ingredients?)(?:\*{0,2})[:\s]*\n/i,
+    /\n(?:#{1,4}\s*|\*{0,2})(?:instructions?|directions?|method)(?:\*{0,2})[:\s]*\n/i,
+    // Numbered step starting with a cooking verb (avoids matching blog "3 reasons to..." lists)
+    /\n1\.\s+(?:Preheat|Heat|Mix|Combine|Add|Cook|Prepare|Make|Place|Bring|Stir|Pour|Cut|Chop|Roast|Bake|Fry|Grill|Season|Marinate|In\s+a\b)/,
+    // Bullet ingredient line with a measurement unit
+    /\n\s*[-•*]\s+(?:\d[\d\s\/¼½¾⅓⅔⅛]*\s+)?(?:cup|cups|tbsp|tablespoon|tsp|teaspoon|oz|ounce|lb|pound|gram|ml|litre|liter|clove|can|bunch|pinch|large|small|medium)\b/i,
+  ];
+
+  for(const rx of anchors){
+    const m=text.match(rx);
+    if(m){
+      // Go back 800 chars to capture recipe name, servings, and intro before the anchor
+      const start=Math.max(0,m.index-800);
+      return text.substring(start,start+CHUNK);
+    }
   }
 
-  // Strategy 2: Look for numbered cooking steps pattern (1. Do something with at least 20 chars)
-  // This catches recipe cards where the section heading is missing but the steps are still there
-  const numberedRx=/\n1\.\s+[A-Z].{20,}/;
-  const nm=text.match(numberedRx);
-  if(nm){
-    const start=Math.max(0,nm.index-1000);
-    return text.substring(start,start+8000);
-  }
-
-  // Strategy 3: Look for bullet ingredient pattern (- 1 cup something / • 2 tbsp)
-  const bulletIngrRx=/\n[-•]\s+\d[\d\/\s]*(?:cup|tbsp?|tsp?|oz|lb|g|kg|ml|l|clove|can|bunch|pinch)/i;
-  const bm=text.match(bulletIngrRx);
-  if(bm){
-    const start=Math.max(0,bm.index-400);
-    return text.substring(start,start+8000);
-  }
-
-  // Final fallback: last 8000 chars (recipe cards are usually near the end of the page)
-  return text.length>8000?text.substring(text.length-8000):text;
+  // Last resort: last CHUNK chars (recipe cards trend toward end of page)
+  return text.substring(text.length-CHUNK);
 }
 
 // Use Groq to extract a recipe from plain text/markdown (text-only, no image)
@@ -2751,19 +2752,31 @@ ${section}`;
   const data=await callGroq([],prompt);
   const raw=data.choices?.[0]?.message?.content||'';
   const result=parseGroqJSON(raw);
-  if(result&&Array.isArray(result.steps)){
-    // Filter out any garbage steps: markdown links, mailto, bare URLs, too short, recipe name echoed back
+  if(!result)return null;
+
+  // Filter junk from steps: links, mailto, bare URLs, too short
+  if(Array.isArray(result.steps)){
     result.steps=result.steps.filter(s=>{
       if(!s||typeof s!=='string')return false;
       const t=s.trim();
-      if(t.length<10)return false;
-      if(/\]\(mailto:/i.test(t))return false;   // mailto link
-      if(/^\[.*?\]\(/.test(t))return false;       // any bare markdown link
-      if(/^https?:\/\/\S+$/.test(t))return false; // naked URL
-      if(/^[•\-\*]\s*\[\s*\]/.test(t))return false; // bullet + empty link
+      if(t.length<12)return false;
+      if(/\]\(mailto:/i.test(t))return false;
+      if(/^\[.*?\]\(/.test(t))return false;
+      if(/^https?:\/\/\S+$/.test(t))return false;
+      if(/^[•\-\*]\s*\[\s*\]/.test(t))return false;
       return true;
     });
   }
+
+  // Validate: real cooking steps contain cooking verbs. If fewer than half do, Groq got the wrong section.
+  const cookVerbRx=/\b(?:preheat|heat|mix|combine|add|cook|bake|stir|pour|place|remove|bring|simmer|roast|grill|saut[eé]|fry|season|marinate|serve|assemble|transfer|blend|whisk|fold|chop|slice|dice|drain|rinse|toss|spread|brush|drizzle|knead|rest|let|cover|refrigerat|cool|fluff|toast|layer|garnish|enjoy)\b/i;
+  const steps=result.steps||[];
+  const goodSteps=steps.filter(s=>cookVerbRx.test(s));
+  // If we have steps but less than half are real cooking steps → return null to trigger fallback
+  if(steps.length>0&&goodSteps.length<Math.max(1,Math.floor(steps.length*0.4))){
+    return null;
+  }
+
   return result;
 }
 
@@ -2801,15 +2814,30 @@ async function fetchFromURL(){
     }
     // Jina path: use Groq for best extraction, fall back to markdown parser
     if(useJina){
-      let recipe=null;
-      try{recipe=await groqExtractFromText(html);}catch(e){}
-      if(recipe&&(recipe.steps||[]).length>=2){
+      // Helper: build urlParsed from a Groq result object
+      const stageGroq=(recipe)=>{
         const ingrs=Array.isArray(recipe.ingredients)?recipe.ingredients:[];
         const steps=(recipe.steps||[]).map(s=>{const tm=detectTimer(s);return{phase:'',title:summarizeStepTitle(s),instructions:s,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};});
-        // Extract image from markdown
         const imgM=html.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
         state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:imgM?imgM[1]:'',yield:recipe.servings||recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps,prepTime:recipe.prepTime||'',cookTime:recipe.cookTime||'',totalTime:recipe.totalTime||'',course:recipe.course||'',cuisine:recipe.cuisine||'',calories:recipe.calories||'',notes:recipe.notes||''};
         state.addForm.urlStatus='success';state.addForm.urlError='';
+      };
+
+      // Pass 1: smart section extraction
+      let recipe=null;
+      try{recipe=await groqExtractFromText(html);}catch(e){}
+
+      // Pass 2: if Pass 1 failed validation, retry with last 10000 chars of full text
+      // (recipe cards always live near the end of food blog pages)
+      if(!recipe||(recipe.steps||[]).length<2){
+        try{
+          const tail=html.length>10000?html.substring(html.length-10000):html;
+          if(tail!==html){recipe=await groqExtractFromText(tail);}
+        }catch(e){}
+      }
+
+      if(recipe&&(recipe.steps||[]).length>=2){
+        stageGroq(recipe);
       }else{
         const parsed=parseMarkdownRecipe(html,url);
         state.addForm.urlParsed=parsed;
@@ -2984,18 +3012,16 @@ async function fetchFromURL(){
           const jinaMd=await tryJina(url);
           const ogImage=doc.querySelector('meta[property="og:image"]')?.content||'';
           let recipe=null;
-          // First try Groq on Jina markdown — most reliable
+          // Pass 1: smart section extraction
           try{recipe=await groqExtractFromText(jinaMd);}catch(e){}
-          // If Groq failed or returned no steps, fall back to text parser on the markdown
+          // Pass 2: if Pass 1 failed, retry with last 10000 chars of full Jina text
           if(!recipe||(recipe.steps||[]).length<2){
-            const jinaResult=parseMarkdownRecipe(jinaMd,url);
-            if(jinaResult.steps.length>=2){
-              state.addForm.urlParsed=jinaResult;
-              state.addForm.urlStatus='success';
-              state.addForm.urlError='';
-              jumpToPreview('url');return;
-            }
-          }else{
+            try{
+              const tail=jinaMd.length>10000?jinaMd.substring(jinaMd.length-10000):jinaMd;
+              if(tail!==jinaMd){recipe=await groqExtractFromText(tail);}
+            }catch(e){}
+          }
+          if(recipe&&(recipe.steps||[]).length>=2){
             const ingrs=Array.isArray(recipe.ingredients)?recipe.ingredients:[];
             const steps=(recipe.steps||[]).map(s=>{
               const tm=detectTimer(s);
@@ -3005,6 +3031,15 @@ async function fetchFromURL(){
             state.addForm.urlStatus='success';
             state.addForm.urlError='';
             jumpToPreview('url');return;
+          }else{
+            // Groq couldn't extract — fall back to regex text parser on Jina markdown
+            const jinaResult=parseMarkdownRecipe(jinaMd,url);
+            if(jinaResult.steps.length>=2){
+              state.addForm.urlParsed=jinaResult;
+              state.addForm.urlStatus='success';
+              state.addForm.urlError='';
+              jumpToPreview('url');return;
+            }
           }
         }catch(e){/* Jina failed, continue with DOM fallback */}
       }
