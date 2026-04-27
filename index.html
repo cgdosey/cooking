@@ -2053,6 +2053,28 @@ Important: ignore any photos or images within the recipe — only extract text (
     const raw=data.choices?.[0]?.message?.content||'';
     const recipe=parseGroqJSON(raw);
 
+    // If ingredients came back empty, do a dedicated second pass just for ingredients.
+    // This handles two-column cookbook layouts where the model misses the left column.
+    const totalItems=(recipe.ingredients||[]).reduce((n,s)=>n+(Array.isArray(s.items)?s.items.length:1),0);
+    if(totalItems<2){
+      try{
+        const ingrPrompt=`Look at this recipe image carefully. Your ONLY job is to find and list ALL the ingredients.
+
+The ingredients may appear in a LEFT column alongside the cooking instructions (this is a common cookbook layout). They may have no heading, or just say "Serves X" or "Makes X" above them. Look everywhere — left column, top section, any list of food items with quantities.
+
+Return ONLY this JSON, nothing else:
+{"ingredients":[{"section":"Ingredients","items":["item 1 with quantity","item 2 with quantity"]}]}
+
+Do not include serving size, yield, or cooking instructions. Only food items with their quantities.`;
+        const ingrData=await callGroq([compressed[0]],ingrPrompt);
+        const ingrRaw=ingrData.choices?.[0]?.message?.content||'';
+        const ingrJSON=parseGroqJSON(ingrRaw);
+        if(ingrJSON&&(ingrJSON.ingredients||[]).length){
+          recipe.ingredients=ingrJSON.ingredients;
+        }
+      }catch(e){console.warn('Ingredient fallback pass failed:',e);}
+    }
+
     // ingredients can be [{section,items}] or flat string[]
     const ingrText=buildIngrText(recipe.ingredients||[]);
 
