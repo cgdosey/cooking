@@ -1263,7 +1263,7 @@ function renderList(){
         <div class="topbar-row">
           <div class="topbar-brand">
             <div class="topbar-logo"><svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><text x="6" y="17" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="rgba(255,255,255,0.5)">R</text><text x="12" y="24" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="#ffffff">R</text></svg></div>
-            <span class="topbar-wordmark">Recipe Ripper</span>
+            <span class="topbar-wordmark">Recipe Ripper</span><span style="font-size:.6rem;color:var(--text-3);font-weight:500;margin-left:4px">v27</span>
           </div>
           <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
         </div>
@@ -2754,28 +2754,28 @@ ${section}`;
   const result=parseGroqJSON(raw);
   if(!result)return null;
 
-  // Filter junk from steps: links, mailto, bare URLs, too short
+  // Per-step filter — remove any step that looks like junk
+  const recipeName=(result.name||'').toLowerCase().trim();
+  const cookVerbRx=/\b(?:preheat|heat|mix|combine|add|cook|bake|stir|pour|place|remove|bring|simmer|roast|grill|saut[eé]|fry|season|marinate|serve|assemble|transfer|blend|whisk|fold|chop|slice|dice|drain|rinse|toss|spread|brush|drizzle|knead|rest|let|cover|refrigerat|cool|fluff|toast|layer|garnish|enjoy|set\s+aside|make|prepare|chill|warm|top|finish|reduce|sear|brown|coat|fill|roll|wrap|shape|mash|squeeze|cut|trim|grate|shred|peel|halve|quarter|separate|deglaze)\b/i;
   if(Array.isArray(result.steps)){
     result.steps=result.steps.filter(s=>{
       if(!s||typeof s!=='string')return false;
       const t=s.trim();
       if(t.length<12)return false;
-      if(/\]\(mailto:/i.test(t))return false;
-      if(/^\[.*?\]\(/.test(t))return false;
-      if(/^https?:\/\/\S+$/.test(t))return false;
-      if(/^[•\-\*]\s*\[\s*\]/.test(t))return false;
+      if(/\]\(mailto:/i.test(t))return false;       // mailto link
+      if(/^\[.*?\]\(/.test(t))return false;          // markdown link
+      if(/^https?:\/\/\S+$/.test(t))return false;   // bare URL
+      if(/^[•\-\*]\s*\[\s*\]/.test(t))return false; // empty bullet link
+      // Remove step if it IS the recipe name
+      if(recipeName&&t.toLowerCase()===recipeName)return false;
+      // Short steps (< 80 chars) that have no cooking verb are taglines/headers/junk
+      if(t.length<80&&!cookVerbRx.test(t))return false;
       return true;
     });
   }
 
-  // Validate: real cooking steps contain cooking verbs. If fewer than half do, Groq got the wrong section.
-  const cookVerbRx=/\b(?:preheat|heat|mix|combine|add|cook|bake|stir|pour|place|remove|bring|simmer|roast|grill|saut[eé]|fry|season|marinate|serve|assemble|transfer|blend|whisk|fold|chop|slice|dice|drain|rinse|toss|spread|brush|drizzle|knead|rest|let|cover|refrigerat|cool|fluff|toast|layer|garnish|enjoy)\b/i;
-  const steps=result.steps||[];
-  const goodSteps=steps.filter(s=>cookVerbRx.test(s));
-  // If we have steps but less than half are real cooking steps → return null to trigger fallback
-  if(steps.length>0&&goodSteps.length<Math.max(1,Math.floor(steps.length*0.4))){
-    return null;
-  }
+  // If no usable steps after filtering, return null so the fallback parser runs
+  if(!result.steps||result.steps.length<1)return null;
 
   return result;
 }
