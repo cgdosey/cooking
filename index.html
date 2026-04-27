@@ -2596,11 +2596,11 @@ function parseMarkdownRecipe(md,url){
   // Extract OG image from markdown (Jina sometimes includes ![...](url))
   const imgM=md.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
   const image=imgM?imgM[1]:'';
-  // Run through the text parser
+  // Run through the text parser — parsed.ingredients already returns [{section,items}]
   const parsed=parseRecipeText(md);
   return{
     name,description:'',image,yield:'',difficulty:'Intermediate',cookware:[],
-    ingredients:parsed.ingredients.length?[{section:'Ingredients',items:parsed.ingredients}]:[],
+    ingredients:parsed.ingredients,
     steps:parsed.steps
   };
 }
@@ -2775,7 +2775,20 @@ async function fetchFromURL(){
       state.addForm.urlError=parsed.steps.length?'':'Recipe info found but steps could not be extracted. Try Paste Text.';
       state.addForm.urlParsed=parsed;
     }else{
-      // No JSON-LD — try DOM extraction first, then text parsing
+      // No JSON-LD found from HTML proxy — try Jina for JS-rendered content before falling back
+      if(!useJina){
+        try{
+          const jinaMd=await tryJina(url);
+          const jinaResult=parseMarkdownRecipe(jinaMd,url);
+          if(jinaResult.steps.length>=2){
+            state.addForm.urlParsed=jinaResult;
+            state.addForm.urlStatus='success';
+            state.addForm.urlError='';
+            renderAdd();return;
+          }
+        }catch(e){/* Jina failed, continue with DOM fallback */}
+      }
+      // Final fallback — DOM extraction + text parsing
       const domSteps=domExtractSteps(doc);
       const domIngr=domExtractIngredients(doc);
       cleanDoc(doc);
