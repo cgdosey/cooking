@@ -2665,13 +2665,30 @@ function cleanJinaMarkdown(text){
     const trailerRx=/\n(?:SEARCH\s+FOR|LINKS|IMAGES|SIMILAR|RELATED|COMMENTS)\b/i;
     const t=content.search(trailerRx);
     if(t>400)content=content.substring(0,t);
-    return content;
+    return stripJunkLines(content);
   }
   // No envelope — strip leading metadata key:value lines (Title:, Published Time:, etc.)
   const lines=text.split('\n');
   let start=0;
   while(start<lines.length&&/^(?:title|url|published|updated|author|source|description)\s*:/i.test(lines[start].trim()))start++;
-  return lines.slice(start).join('\n').trim()||text;
+  return stripJunkLines(lines.slice(start).join('\n').trim()||text);
+}
+
+// Remove non-recipe lines from Jina markdown: mailto links, bare URLs, social links, empty brackets
+function stripJunkLines(text){
+  return text.split('\n').filter(line=>{
+    const l=line.trim();
+    if(!l)return true; // keep blank lines for structure
+    // Remove lines that are purely markdown links with mailto or empty href
+    if(/^\s*[•\-\*]?\s*\[.*?\]\(mailto:/i.test(l))return false;
+    // Remove lines that are purely bare URLs or empty markdown links like [](http...)
+    if(/^\s*[•\-\*]?\s*\[\s*\]\(https?:/i.test(l))return false;
+    // Remove lines that are just a naked URL
+    if(/^\s*[•\-\*]?\s*https?:\/\/\S+\s*$/.test(l))return false;
+    // Remove social/nav junk lines
+    if(/^\s*(?:follow\s+us|share\s+this|subscribe|newsletter|©|copyright|privacy\s+policy|terms\s+of|all\s+rights)/i.test(l))return false;
+    return true;
+  }).join('\n');
 }
 
 // Isolate the recipe card section from a full page markdown dump
@@ -2708,12 +2725,27 @@ Rules:
 - calories: per-serving calorie count as a number string only, e.g. "320"
 - notes: any recipe notes, tips, make-ahead info, storage instructions found in the recipe
 - Omit any step that is a tip, blog aside, or meta information (e.g. "How to remove corn silk", "cool summer nights", "Prep Time: 15 mins")
+- NEVER include markdown links, email addresses, URLs, or social media text as steps or ingredients
 
 RECIPE CARD TEXT:
 ${section}`;
   const data=await callGroq([],prompt);
   const raw=data.choices?.[0]?.message?.content||'';
-  return parseGroqJSON(raw);
+  const result=parseGroqJSON(raw);
+  if(result&&Array.isArray(result.steps)){
+    // Filter out any garbage steps: markdown links, mailto, bare URLs, too short, recipe name echoed back
+    result.steps=result.steps.filter(s=>{
+      if(!s||typeof s!=='string')return false;
+      const t=s.trim();
+      if(t.length<10)return false;
+      if(/\]\(mailto:/i.test(t))return false;   // mailto link
+      if(/^\[.*?\]\(/.test(t))return false;       // any bare markdown link
+      if(/^https?:\/\/\S+$/.test(t))return false; // naked URL
+      if(/^[•\-\*]\s*\[\s*\]/.test(t))return false; // bullet + empty link
+      return true;
+    });
+  }
+  return result;
 }
 
 // Parse Jina markdown into a recipe object
