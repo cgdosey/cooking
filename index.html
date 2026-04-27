@@ -9,45 +9,19 @@
   <meta name="apple-mobile-web-app-title" content="Recipe Ripper">
   <meta name="theme-color" content="#D4705A">
   <script>
-  // Generate app icon — spatula & whisk crossed on terracotta background
+  // Generate app icon — bold "K" on terracotta
   (function(){
     try{
       const c=document.createElement('canvas');
       c.width=512;c.height=512;
       const ctx=c.getContext('2d');
       const W=512,H=512;
-
-      // ── Background ──
-      const bg=ctx.createLinearGradient(0,0,W,H);
-      bg.addColorStop(0,'#D4705A');bg.addColorStop(1,'#B85A46');
-      ctx.fillStyle=bg;
-      ctx.beginPath();ctx.roundRect(0,0,W,H,100);ctx.fill();
-
-      // Single spatula, centred horizontally, rising from below the bottom edge
-      const cx=W/2;
-      const WC='rgba(255,255,255,0.97)';
-      ctx.lineCap='round';ctx.lineJoin='round';
-
-      // Handle — starts past the bottom edge so it looks like it's coming out of the icon
-      ctx.strokeStyle=WC;ctx.lineWidth=26;
-      ctx.beginPath();ctx.moveTo(cx,530);ctx.lineTo(cx,308);ctx.stroke();
-
-      // Neck / collar
-      ctx.strokeStyle=WC;ctx.lineWidth=34;
-      ctx.beginPath();ctx.moveTo(cx,308);ctx.lineTo(cx,262);ctx.stroke();
-
-      // Paddle
-      const pW=96,pY=62,pH=192;
-      ctx.fillStyle=WC;
-      ctx.beginPath();ctx.roundRect(cx-pW/2,pY,pW,pH,13);ctx.fill();
-
-      // Slots — 3, centred in paddle width
-      ctx.fillStyle='#9E4035';
-      for(let i=0;i<3;i++){
-        ctx.beginPath();ctx.roundRect(cx-34+i*26,pY+14,16,pH-28,6);ctx.fill();
-      }
-
-      // Set as apple-touch-icon and favicon
+      ctx.fillStyle='#D4705A';
+      ctx.beginPath();ctx.roundRect(0,0,W,H,112);ctx.fill();
+      ctx.fillStyle='#ffffff';
+      ctx.font='700 310px -apple-system,"Helvetica Neue",Arial,sans-serif';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('K',W/2+4,H/2+8);
       const link=document.createElement('link');
       link.rel='apple-touch-icon';link.href=c.toDataURL('image/png');
       document.head.appendChild(link);
@@ -738,7 +712,8 @@ function saveShopList(){save('k_shoplist',shoppingList);}
 const TIMER_ZERO={remaining:0,total:0,running:false,done:false,_id:null,endTime:null,label:''};
 let state={
   tab:'recipes',         // 'recipes'|'shoplist'|'timers'
-  view:'list',           // 'list'|'detail'|'guided'|'full'|'add'|'complete'
+  view:'list',           // 'list'|'detail'|'guided'|'full'|'add'|'complete'|'preview'
+  previewData:null,      // recipe data staged for preview before save
   detailTab:'ingredients',
   shopTab:'aisle',
   addTab:'url',
@@ -1374,7 +1349,7 @@ function renderGuided(){
       <span style="font-size:.82rem;color:var(--text-3)">min</span>
       <button onclick="applyCustomTimer()" style="font-size:.8rem;padding:5px 12px;border-radius:8px;background:var(--terra);color:#fff;border:none;cursor:pointer;font-weight:600">Add Timer</button>
     </div>`;
-  const stepImg=step.image?`<img class="step-img" src="${escH(step.image)}" alt="">`:'' ;
+  const stepImg='';
   document.getElementById('app').innerHTML=`
     <div class="guided-shell">
       <div class="guided-top">
@@ -1641,7 +1616,7 @@ function renderAdd(){
           </div>`).join('')}
         ${(p.steps||[]).length>3?`<div style="font-size:.8rem;color:var(--text-3);text-align:center;padding:6px 0">+ ${p.steps.length-3} more steps</div>`:''}
         <div class="field" style="margin-top:14px"><label>Recipe Name</label><input class="input" id="url-name" value="${escH(p.name||'')}" placeholder="Recipe name"/></div>
-        <button class="btn btn-terra btn-full btn-lg" onclick="saveURLRecipe()">Save Recipe</button>
+        <button class="btn btn-terra btn-full btn-lg" onclick="previewURLRecipe()">Preview &amp; Save</button>
       </div>`;
   }
   const urlTab=`
@@ -1680,7 +1655,7 @@ function renderAdd(){
           </div>`).join('')}
         ${f.parsedSteps.length>4?`<div style="font-size:.8rem;color:var(--text-3);text-align:center;padding:6px 0">+ ${f.parsedSteps.length-4} more steps</div>`:''}
         <div class="field" style="margin-top:14px"><label>Recipe Name</label><input class="input" id="paste-name" placeholder="Give your recipe a name"/></div>
-        <button class="btn btn-terra btn-full btn-lg" onclick="saveParsed()">Save Recipe</button>`;
+        <button class="btn btn-terra btn-full btn-lg" onclick="previewPasteRecipe()">Preview &amp; Save</button>`;
     }else{
       pasteResult=`<div class="url-status err">${I.info} No steps could be detected. Make sure you include the full recipe with numbered steps.</div>`;
     }
@@ -2028,7 +2003,9 @@ Rules:
 Return ONLY this JSON, nothing else, no markdown:
 {"name":"Recipe Name","ingredients":[{"section":"For the Dough","items":["450g flour","7g yeast"]},{"section":"For the Sauce","items":["2 tbsp olive oil"]}],"steps":["Full step 1.","Full step 2."]}
 
-If there is only one ingredient group with no section heading, use: {"section":"Ingredients","items":[...]}`;
+If there is only one ingredient group with no section heading, use: {"section":"Ingredients","items":[...]}
+
+Important: ignore any photos or images within the recipe — only extract text (name, ingredients, steps).`;
 
     const data=await callGroq(compressed,prompt);
     const raw=data.choices?.[0]?.message?.content||'';
@@ -2170,7 +2147,7 @@ function renderScanTab(){
       <button class="add-step-btn" onclick="scanAddStep()">${I.plus} Add Step</button>
       <div style="display:flex;gap:10px;margin-top:4px">
         <button class="btn btn-ghost" onclick="scanReset()" style="flex:1">Start Over</button>
-        <button class="btn btn-terra" onclick="saveScanRecipe()" style="flex:2">Save Recipe</button>
+        <button class="btn btn-terra" onclick="previewScanRecipe()" style="flex:2">Preview &amp; Save</button>
       </div>
     </div>`;
   }
@@ -2447,7 +2424,7 @@ function parseJSONLD(json){
     if(!item)return null;
     if(typeof item==='string'){const t=stripTags(item);return t.length>5?t:null;}
     const t=stripTags(item.text||item.name||item['@value']||'');
-    return t.length>5?{text:t,name:stripTags(item.name||''),img:typeof item.image==='string'?item.image:(item.image?.url||''),time:parseDuration(item.timeRequired)||null}:null;
+    return t.length>5?{text:t,name:stripTags(item.name||''),time:parseDuration(item.timeRequired)||null}:null;
   }
   // Try standard recipeInstructions, then fall back to non-standard fields
   const rawInstr=json.recipeInstructions||json.instructions||json.steps||[];
@@ -2459,12 +2436,12 @@ function parseJSONLD(json){
       const sectionPhase=stripTags(item.name||'').trim();
       item.itemListElement.forEach(sub=>{
         const s=extractStep(sub);
-        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:sectionPhase,title:nm&&nm.length<80&&nm!==t?nm:summarizeStepTitle(t),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
+        if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:sectionPhase,title:nm&&nm.length<80&&nm!==t?nm:summarizeStepTitle(t),instructions:t,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
       });
     } else {
       // HowToStep, plain string, or object with text/name — no section
       const s=extractStep(item);
-      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const img=typeof s==='string'?'':s.img;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:'',title:nm&&nm.length<80&&nm!==t?nm:summarizeStepTitle(t),instructions:t,image:img,timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
+      if(s){const t=typeof s==='string'?s:s.text;const nm=typeof s==='string'?'':s.name;const tm=(typeof s==='object'&&s.time)||detectTimer(t);steps.push({phase:'',title:nm&&nm.length<80&&nm!==t?nm:summarizeStepTitle(t),instructions:t,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''});}
     }
   });
   // Fix timer labels
@@ -2750,6 +2727,146 @@ function deleteRecipe(id){
 }
 
 // ═══════════════════════════════════════
+//  RECIPE PREVIEW (before save)
+// ═══════════════════════════════════════
+function previewURLRecipe(){
+  const name=document.getElementById('url-name')?.value.trim();
+  const p=state.addForm.urlParsed;
+  if(!p)return;
+  state.previewData={
+    source:'url',
+    name:name||p.name||'Untitled Recipe',
+    image:p.image||'',
+    description:p.description||'',
+    yield:p.yield||'',
+    difficulty:p.difficulty||'Intermediate',
+    cookware:p.cookware||[],
+    ingredients:p.ingredients||[],
+    steps:(p.steps||[]).map(s=>({...s}))
+  };
+  state.view='preview';render();
+}
+
+function previewPasteRecipe(){
+  const name=document.getElementById('paste-name')?.value.trim();
+  const f=state.addForm;
+  if(!f.parsedSteps||!f.parsedSteps.length)return;
+  state.previewData={
+    source:'paste',
+    name:name||'Untitled Recipe',
+    image:'',description:'',yield:'',difficulty:'Intermediate',cookware:[],
+    ingredients:f.parsedIngr||[],
+    steps:f.parsedSteps||[]
+  };
+  state.view='preview';render();
+}
+
+function previewScanRecipe(){
+  const name=document.getElementById('scan-name')?.value.trim();
+  if(!name){showToast('Please enter a recipe name');return;}
+  const ingrText=document.getElementById('scan-ingr')?.value.trim()||'';
+  const ingredients=parseIngrText(ingrText);
+  const stepEls=document.querySelectorAll('#scan-steps-list .scan-step-ta');
+  const steps=Array.from(stepEls).map(el=>{
+    const inst=el.value.trim();
+    if(!inst)return null;
+    const tm=detectTimer(inst);
+    return{phase:'',title:summarizeStepTitle(inst),instructions:inst,timerMinutes:tm,timerLabel:tm?`${tm} min`:'',image:''};
+  }).filter(Boolean);
+  if(!steps.length){showToast('Please add at least one step');return;}
+  state.previewData={
+    source:'scan',
+    name,
+    image:scanForm.images[0]||'',
+    description:'',yield:'',difficulty:'Intermediate',cookware:[],
+    ingredients,steps
+  };
+  state.view='preview';render();
+}
+
+function closePreview(){
+  state.view='add';render();
+}
+
+function saveFromPreview(){
+  const name=document.getElementById('preview-name')?.value.trim();
+  if(!name){showToast('Please enter a recipe name');return;}
+  const p=state.previewData;
+  recipes.push({
+    id:nextId++,name,
+    description:p.description||'',
+    image:p.image||'',
+    yield:p.yield||'',
+    difficulty:p.difficulty||'Intermediate',
+    cookware:p.cookware||[],
+    ingredients:p.ingredients||[],
+    steps:(p.steps||[]).map(s=>({...s}))
+  });
+  saveRecipes();
+  resetForm();
+  if(p.source==='scan')scanReset();
+  state.previewData=null;
+  go('list');showToast('Recipe saved!');
+}
+
+function renderPreview(){
+  const p=state.previewData;
+  if(!p){go('add');return;}
+  const allIngr=(p.ingredients||[]).flatMap(s=>s.items||[]);
+  const sectionCount=(p.ingredients||[]).filter(s=>s.items&&s.items.length).length;
+
+  const ingrHTML=(p.ingredients||[]).map(sec=>{
+    const hdr=sectionCount>1&&!/^ingredients$/i.test(sec.section||'')
+      ?`<div style="font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);margin:12px 0 4px;padding-top:4px">${escH(sec.section)}</div>`
+      :'';
+    return hdr+(sec.items||[]).map(item=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.9rem;color:var(--text-1)">${escH(item)}</div>`).join('');
+  }).join('');
+
+  const stepsHTML=(p.steps||[]).map((s,i)=>`
+    <div style="margin-bottom:14px;background:var(--bg-2);border-radius:12px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${s.instructions?'8':'0'}px">
+        <span style="background:var(--terra);color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0">${i+1}</span>
+        ${s.title?`<span style="font-weight:600;font-size:.9rem;color:var(--text)">${escH(s.title)}</span>`:''}
+        ${s.timerMinutes?`<span style="margin-left:auto;background:var(--terra-bg,#FFF5F0);color:var(--terra);font-size:.74rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap">${s.timerMinutes} min</span>`:''}
+      </div>
+      ${s.instructions?`<div style="font-size:.9rem;line-height:1.7;color:var(--text-1)">${escH(s.instructions)}</div>`:''}
+    </div>`).join('');
+
+  document.getElementById('app').innerHTML=`
+    <div class="shell">
+      <div class="topbar"><div class="topbar-row">
+        <button class="ibtn" onclick="closePreview()">${I.back}</button>
+        <div class="topbar-title" style="font-size:1.05rem">Preview Recipe</div>
+        <div style="width:40px"></div>
+      </div></div>
+      <div class="add-page" style="padding-bottom:110px">
+        ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:18px" onerror="this.remove()">`:''}
+        <div class="field" style="margin-bottom:18px">
+          <label>Recipe Name</label>
+          <input class="input" id="preview-name" value="${escH(p.name)}" placeholder="Recipe name"/>
+        </div>
+        ${p.description?`<div style="font-size:.88rem;color:var(--text-2);margin-bottom:16px;line-height:1.65">${escH(p.description.substring(0,200))}${p.description.length>200?'…':''}</div>`:''}
+        ${(p.yield||p.difficulty)&&p.difficulty!=='Intermediate'?`<div class="url-meta-row" style="margin-bottom:16px">
+          ${p.yield?`<span class="meta-chip">${escH(p.yield)}</span>`:''}
+          ${p.difficulty?`<span class="meta-chip">${escH(p.difficulty)}</span>`:''}
+        </div>`:''}
+
+        ${allIngr.length?`
+        <div class="slabel" style="margin-bottom:8px">${allIngr.length} Ingredient${allIngr.length!==1?'s':''} ${sectionCount>1?`<span style="font-weight:400;text-transform:none;font-size:.76rem;color:var(--text-3)">· ${sectionCount} sections</span>`:''}</div>
+        <div style="background:var(--bg-2);border-radius:12px;padding:10px 16px 6px;margin-bottom:20px">
+          ${ingrHTML}
+        </div>`:''}
+
+        <div class="slabel" style="margin-bottom:10px">${(p.steps||[]).length} Step${(p.steps||[]).length!==1?'s':''}</div>
+        ${stepsHTML}
+
+        <button class="btn btn-terra btn-full btn-lg" style="margin-top:12px" onclick="saveFromPreview()">Save Recipe</button>
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePreview()">← Back to Edit</button>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════
 //  MAIN RENDER
 // ═══════════════════════════════════════
 function render(){
@@ -2758,6 +2875,7 @@ function render(){
   if(state.view==='full'){renderFull();return;}
   if(state.view==='detail'){renderDetail();return;}
   if(state.view==='add'){renderAdd();return;}
+  if(state.view==='preview'){renderPreview();return;}
   if(state.tab==='shoplist'){renderShopList();return;}
   if(state.tab==='timers'){renderTimers();return;}
   renderList();
