@@ -1291,6 +1291,8 @@ function renderDetail(){
   }else if(state.detailTab==='cookware'){
     const items=(r.cookware||[]);
     tabContent=items.length?`<div class="tab-content">${items.map(c=>`<div class="cw-item"><span class="cw-dot"></span>${escH(c)}</div>`).join('')}</div>`:`<div style="padding:16px 18px;color:var(--text-3);font-size:.9rem">No cookware listed.</div>`;
+  }else if(state.detailTab==='notes'){
+    tabContent=`<div class="tab-content"><div style="font-size:.9rem;line-height:1.8;color:var(--text-1);white-space:pre-wrap">${escH(r.notes||'')}</div></div>`;
   }else{
     // Group steps by phase and write out in full
     const groups=[];
@@ -1334,11 +1336,20 @@ function renderDetail(){
       <div class="detail-hdr">
         <div class="detail-name">${escH(r.name)}</div>
         <div class="detail-meta">${I.clock} ${ho?ho+' hands-off':r.totalTime||''}${r.yield?` &nbsp;·&nbsp; ${escH(r.yield)}`:''}</div>
+        ${(r.prepTime||r.cookTime||r.course||r.cuisine||r.calories)?`
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+          ${r.prepTime?`<span class="meta-chip">Prep ${escH(r.prepTime)}</span>`:''}
+          ${r.cookTime?`<span class="meta-chip">Cook ${escH(r.cookTime)}</span>`:''}
+          ${r.course?`<span class="meta-chip">${escH(r.course)}</span>`:''}
+          ${r.cuisine?`<span class="meta-chip">${escH(r.cuisine)}</span>`:''}
+          ${r.calories?`<span class="meta-chip">${escH(r.calories)} cal</span>`:''}
+        </div>`:''}
       </div>
       <div class="sub-tabs">
         <button class="sub-tab ${state.detailTab==='ingredients'?'active':''}" onclick="setDTab('ingredients')">Ingredients</button>
         <button class="sub-tab ${state.detailTab==='cookware'?'active':''}" onclick="setDTab('cookware')">Cookware</button>
         <button class="sub-tab ${state.detailTab==='steps'?'active':''}" onclick="setDTab('steps')">Steps</button>
+        ${r.notes?`<button class="sub-tab ${state.detailTab==='notes'?'active':''}" onclick="setDTab('notes')">Notes</button>`:''}
       </div>
       ${tabContent}
       <div class="detail-cta">
@@ -1765,7 +1776,7 @@ function renderAdd(){
 // ═══════════════════════════════════════
 function addStep(){state.addForm.steps.push({title:'',instructions:'',phase:'',timerMinutes:null});renderAdd();}
 function removeStep(i){state.addForm.steps.splice(i,1);renderAdd();}
-const FORM_RESET={name:'',desc:'',yield:'',diff:'Intermediate',ingr:'',cookware:'',steps:[],paste:'',parsedIngr:[],parsedSteps:null,url:'',urlStatus:null,urlError:'',urlParsed:null};
+const FORM_RESET={name:'',desc:'',yield:'',diff:'Intermediate',ingr:'',cookware:'',steps:[],paste:'',parsedIngr:[],parsedSteps:null,url:'',urlStatus:null,urlError:'',urlParsed:null,prepTime:'',cookTime:'',totalTime:'',course:'',cuisine:'',calories:'',notes:''};
 function resetForm(){state.addForm={...FORM_RESET};}
 
 // ═══════════════════════════════════════
@@ -2045,11 +2056,11 @@ Rules:
 - "Serves X", "Makes X", yield information, and serving size labels are NOT ingredients — do not include them in the ingredients list
 
 Return ONLY this JSON, nothing else, no markdown:
-{"name":"Recipe Name","ingredients":[{"section":"For the Dough","items":["450g flour","7g yeast"]},{"section":"For the Sauce","items":["2 tbsp olive oil"]}],"steps":["Full step 1.","Full step 2."]}
+{"name":"Recipe Name","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min","course":"Dinner","cuisine":"Italian","servings":"4 servings","calories":"320","notes":"Any recipe notes or tips here","ingredients":[{"section":"For the Dough","items":["450g flour","7g yeast"]},{"section":"For the Sauce","items":["2 tbsp olive oil"]}],"steps":["Full step 1.","Full step 2."]}
 
 If there is only one ingredient group (with or without a heading), use: {"section":"Ingredients","items":[...]}
-
-Important: ignore any photos or images within the recipe — only extract text (name, ingredients, steps).`;
+If a field is not present in the recipe, omit it or use an empty string.
+Important: ignore any photos or images within the recipe — only extract text.`;
 
     const data=await callGroq(compressed,prompt);
     const raw=data.choices?.[0]?.message?.content||'';
@@ -2086,6 +2097,14 @@ Do not include serving size, yield, or cooking instructions. Only food items wit
       status:'editing',
       name:recipe.name||'Scanned Recipe',
       ingrText,
+      prepTime:recipe.prepTime||'',
+      cookTime:recipe.cookTime||'',
+      totalTime:recipe.totalTime||'',
+      course:recipe.course||'',
+      cuisine:recipe.cuisine||'',
+      servings:recipe.servings||'',
+      calories:recipe.calories||'',
+      notes:recipe.notes||'',
       steps:(recipe.steps||[]).map(s=>({
         instructions:s,timerMinutes:detectTimer(s),
         title:summarizeStepTitle(s),phase:'',timerLabel:'',image:''
@@ -2403,6 +2422,15 @@ function parseDuration(d){
   if(!m)return null;
   return(parseInt(m[1]||0)*1440)+(parseInt(m[2]||0)*60)+parseInt(m[3]||0)||null;
 }
+function fmtDuration(d){
+  if(!d)return'';
+  // Already a human string (e.g. "30 min", "1 hr 15 min") — return as-is
+  if(!/^P/i.test(String(d)))return String(d).trim();
+  const mins=parseDuration(d);
+  if(!mins)return'';
+  const h=Math.floor(mins/60),m=mins%60;
+  return h&&m?`${h} hr ${m} min`:h?`${h} hr`:`${m} min`;
+}
 function detectTimer(text){
   // Patterns that introduce a wait/rest/cook duration (most actionable)
   const ACTION_RX=/(?:(?:bake|cook|roast|simmer|boil|fry|rest|let\s+(?:it\s+)?(?:rest|sit|rise|cool|stand)|proof|ferment|chill|refrigerate|freeze|soak|marinate|steep|wait|leave|set\s+aside|allow|let\s+stand)\s+(?:for\s+)?|for\s+)(\d+(?:\.\d+)?)\s*(?:to|-|–|—)\s*(\d+(?:\.\d+)?)\s*(hour|hr|minute|min)s?/gi;
@@ -2531,7 +2559,22 @@ function parseJSONLD(json){
   });
   // Fix timer labels
   steps.forEach(s=>{if(s.timerMinutes&&!s.timerLabel)s.timerLabel=`${s.timerMinutes} min`;});
-  return{name:json.name||'',description:desc,image,yield:String(yld),difficulty:'Intermediate',cookware,ingredients,steps};
+  // Time fields
+  const prepTime=fmtDuration(json.prepTime)||'';
+  const cookTime=fmtDuration(json.cookTime)||'';
+  const totalTime=fmtDuration(json.totalTime)||'';
+  // Cuisine & course
+  const cuisine=Array.isArray(json.recipeCuisine)?json.recipeCuisine.join(', '):(json.recipeCuisine||'');
+  const course=Array.isArray(json.recipeCategory)?json.recipeCategory[0]:(json.recipeCategory||'');
+  // Calories — nutrition can be an object or array
+  const nut=Array.isArray(json.nutrition)?json.nutrition[0]:json.nutrition;
+  const calories=String(nut?.calories||'').replace(/\s*(kcal|calories?)\s*/i,'').trim();
+  // Notes — schema.org doesn't have a standard notes field, but many plugins use these
+  const notesRaw=json.comment||json.notes||json.note||'';
+  const notes=Array.isArray(notesRaw)
+    ?notesRaw.map(n=>typeof n==='string'?n:(n.text||n.name||'')).filter(Boolean).join('\n\n')
+    :(typeof notesRaw==='string'?notesRaw:'');
+  return{name:json.name||'',description:desc,image,yield:String(yld),difficulty:'Intermediate',cookware,ingredients,steps,prepTime,cookTime,totalTime,cuisine,course,calories,notes};
 }
 
 // Multiple proxy strategies
@@ -2609,13 +2652,18 @@ async function groqExtractFromText(text){
   const prompt=`You are extracting data from a RECIPE CARD section of a food blog page. The text below is only the recipe card — ignore any surrounding blog narrative, tips, or stories.
 
 Extract the structured recipe. Return ONLY this JSON, nothing else, no markdown fences:
-{"name":"Recipe Name","yield":"8 people","description":"One sentence description","ingredients":[{"section":"For the Corn Stock","items":["4 cups chicken broth","1½ cups milk"]},{"section":"For the Chowder","items":["2 tbsp butter","3 ears corn"]}],"steps":["Step 1 full text.","Step 2 full text."]}
+{"name":"Recipe Name","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min","course":"Dinner","cuisine":"American","servings":"8 people","calories":"320","description":"One sentence description","notes":"Any recipe notes or tips","ingredients":[{"section":"For the Corn Stock","items":["4 cups chicken broth","1½ cups milk"]},{"section":"For the Chowder","items":["2 tbsp butter","3 ears corn"]}],"steps":["Step 1 full text.","Step 2 full text."]}
 
 Rules:
 - ingredients: only actual food items with quantities — NOT tips, blog text, or meta info
 - steps: only real cooking instructions (numbered steps) — NOT tips, Q&A, storage notes, or blog prose
 - If ingredients have section headers (e.g. "For the Corn Stock:", "For the Chowder:"), preserve them as separate sections
-- yield: serving size like "8 people" or "4 servings"
+- servings: serving size like "8 people" or "4 servings"
+- prepTime/cookTime/totalTime: values like "15 min", "1 hr 30 min" — extract if present, otherwise estimate from the recipe
+- course: one of Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Appetizer, Side Dish, Soup, Salad — infer if not stated
+- cuisine: e.g. "American", "Italian" — infer if not stated
+- calories: per-serving calorie count as a number string only, e.g. "320"
+- notes: any recipe notes, tips, make-ahead info, storage instructions found in the recipe
 - Omit any step that is a tip, blog aside, or meta information (e.g. "How to remove corn silk", "cool summer nights", "Prep Time: 15 mins")
 
 RECIPE CARD TEXT:
@@ -2666,7 +2714,7 @@ async function fetchFromURL(){
         const steps=(recipe.steps||[]).map(s=>{const tm=detectTimer(s);return{phase:'',title:summarizeStepTitle(s),instructions:s,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};});
         // Extract image from markdown
         const imgM=html.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
-        state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:imgM?imgM[1]:'',yield:recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps};
+        state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:imgM?imgM[1]:'',yield:recipe.servings||recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps,prepTime:recipe.prepTime||'',cookTime:recipe.cookTime||'',totalTime:recipe.totalTime||'',course:recipe.course||'',cuisine:recipe.cuisine||'',calories:recipe.calories||'',notes:recipe.notes||''};
         state.addForm.urlStatus='success';state.addForm.urlError='';
       }else{
         const parsed=parseMarkdownRecipe(html,url);
@@ -2859,7 +2907,7 @@ async function fetchFromURL(){
               const tm=detectTimer(s);
               return{phase:'',title:summarizeStepTitle(s),instructions:s,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};
             });
-            state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:ogImage,yield:recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps};
+            state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:ogImage,yield:recipe.servings||recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps,prepTime:recipe.prepTime||'',cookTime:recipe.cookTime||'',totalTime:recipe.totalTime||'',course:recipe.course||'',cuisine:recipe.cuisine||'',calories:recipe.calories||'',notes:recipe.notes||''};
             state.addForm.urlStatus='success';
             state.addForm.urlError='';
             renderAdd();return;
@@ -2918,7 +2966,14 @@ function previewURLRecipe(){
     difficulty:p.difficulty||'Intermediate',
     cookware:p.cookware||[],
     ingredients:p.ingredients||[],
-    steps:(p.steps||[]).map(s=>({...s}))
+    steps:(p.steps||[]).map(s=>({...s})),
+    prepTime:p.prepTime||'',
+    cookTime:p.cookTime||'',
+    totalTime:p.totalTime||'',
+    course:p.course||'',
+    cuisine:p.cuisine||'',
+    calories:p.calories||'',
+    notes:p.notes||''
   };
   state.view='preview';render();
 }
@@ -2932,7 +2987,8 @@ function previewPasteRecipe(){
     name:name||'Untitled Recipe',
     image:'',description:'',yield:'',difficulty:'Intermediate',cookware:[],
     ingredients:f.parsedIngr||[],
-    steps:f.parsedSteps||[]
+    steps:f.parsedSteps||[],
+    prepTime:'',cookTime:'',totalTime:'',course:'',cuisine:'',calories:'',notes:''
   };
   state.view='preview';render();
 }
@@ -2954,8 +3010,15 @@ function previewScanRecipe(){
     source:'scan',
     name,
     image:scanForm.images[0]||'',
-    description:'',yield:'',difficulty:'Intermediate',cookware:[],
-    ingredients,steps
+    description:'',yield:scanForm.servings||'',difficulty:'Intermediate',cookware:[],
+    ingredients,steps,
+    prepTime:scanForm.prepTime||'',
+    cookTime:scanForm.cookTime||'',
+    totalTime:scanForm.totalTime||'',
+    course:scanForm.course||'',
+    cuisine:scanForm.cuisine||'',
+    calories:scanForm.calories||'',
+    notes:scanForm.notes||''
   };
   state.view='preview';render();
 }
@@ -2968,15 +3031,24 @@ function saveFromPreview(){
   const name=document.getElementById('preview-name')?.value.trim();
   if(!name){showToast('Please enter a recipe name');return;}
   const p=state.previewData;
+  const prepTime=document.getElementById('pv-prep')?.value.trim()||'';
+  const cookTime=document.getElementById('pv-cook')?.value.trim()||'';
+  const totalTime=document.getElementById('pv-total')?.value.trim()||'';
+  const course=document.getElementById('pv-course')?.value||'';
+  const cuisine=document.getElementById('pv-cuisine')?.value.trim()||'';
+  const servings=document.getElementById('pv-servings')?.value.trim()||'';
+  const calories=document.getElementById('pv-calories')?.value.trim()||'';
+  const notes=document.getElementById('pv-notes')?.value.trim()||'';
   recipes.push({
     id:nextId++,name,
     description:p.description||'',
     image:p.image||'',
-    yield:p.yield||'',
+    yield:servings||p.yield||'',
     difficulty:p.difficulty||'Intermediate',
     cookware:p.cookware||[],
     ingredients:p.ingredients||[],
-    steps:(p.steps||[]).map(s=>({...s}))
+    steps:(p.steps||[]).map(s=>({...s})),
+    prepTime,cookTime,totalTime,course,cuisine,calories,notes
   });
   saveRecipes();
   resetForm();
@@ -3008,35 +3080,54 @@ function renderPreview(){
       ${s.instructions?`<div style="font-size:.9rem;line-height:1.7;color:var(--text-1)">${escH(s.instructions)}</div>`:''}
     </div>`).join('');
 
+  const courseOpts=['','Breakfast','Brunch','Lunch','Dinner','Dessert','Snack','Appetizer','Side Dish','Soup','Salad','Main Course'];
+  const mkField=(id,label,val,ph='')=>`<div class="field"><label>${label}</label><input class="input" id="${id}" value="${escH(val)}" placeholder="${ph}"/></div>`;
+  const mkSelect=(id,label,val)=>`<div class="field"><label>${label}</label><select class="input" id="${id}">${courseOpts.map(o=>`<option value="${o}"${o===val?' selected':''}>${o||'Select…'}</option>`).join('')}</select></div>`;
+
   document.getElementById('app').innerHTML=`
     <div class="shell">
       <div class="topbar"><div class="topbar-row">
         <button class="ibtn" onclick="closePreview()">${I.back}</button>
-        <div class="topbar-title" style="font-size:1.05rem">Preview Recipe</div>
+        <div class="topbar-title" style="font-size:1.05rem">Review & Save</div>
         <div style="width:40px"></div>
       </div></div>
       <div class="add-page" style="padding-bottom:110px">
         ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:18px" onerror="this.remove()">`:''}
-        <div class="field" style="margin-bottom:18px">
+
+        <div class="field" style="margin-bottom:4px">
           <label>Recipe Name</label>
           <input class="input" id="preview-name" value="${escH(p.name)}" placeholder="Recipe name"/>
         </div>
-        ${p.description?`<div style="font-size:.88rem;color:var(--text-2);margin-bottom:16px;line-height:1.65">${escH(p.description.substring(0,200))}${p.description.length>200?'…':''}</div>`:''}
-        ${(p.yield||p.difficulty)&&p.difficulty!=='Intermediate'?`<div class="url-meta-row" style="margin-bottom:16px">
-          ${p.yield?`<span class="meta-chip">${escH(p.yield)}</span>`:''}
-          ${p.difficulty?`<span class="meta-chip">${escH(p.difficulty)}</span>`:''}
-        </div>`:''}
 
-        ${allIngr.length?`
-        <div class="slabel" style="margin-bottom:8px">${allIngr.length} Ingredient${allIngr.length!==1?'s':''} ${sectionCount>1?`<span style="font-weight:400;text-transform:none;font-size:.76rem;color:var(--text-3)">· ${sectionCount} sections</span>`:''}</div>
-        <div style="background:var(--bg-2);border-radius:12px;padding:10px 16px 6px;margin-bottom:20px">
-          ${ingrHTML}
-        </div>`:''}
+        <div class="slabel" style="margin:18px 0 10px">Timing</div>
+        <div class="two-col">
+          ${mkField('pv-prep','Prep Time',p.prepTime,'e.g. 15 min')}
+          ${mkField('pv-cook','Cook Time',p.cookTime,'e.g. 30 min')}
+        </div>
+        ${mkField('pv-total','Total Time',p.totalTime,'e.g. 45 min')}
 
-        <div class="slabel" style="margin-bottom:10px">${(p.steps||[]).length} Step${(p.steps||[]).length!==1?'s':''}</div>
-        ${stepsHTML}
+        <div class="slabel" style="margin:18px 0 10px">Details</div>
+        <div class="two-col">
+          ${mkSelect('pv-course','Course',p.course)}
+          ${mkField('pv-cuisine','Cuisine',p.cuisine,'e.g. Italian')}
+        </div>
+        <div class="two-col">
+          ${mkField('pv-servings','Servings',p.yield,'e.g. 4 servings')}
+          ${mkField('pv-calories','Calories / Serving',p.calories,'e.g. 320')}
+        </div>
 
-        <button class="btn btn-terra btn-full btn-lg" style="margin-top:12px" onclick="saveFromPreview()">Save Recipe</button>
+        <div class="field" style="margin-top:4px">
+          <label>Notes</label>
+          <textarea class="input ta" id="pv-notes" rows="3" placeholder="Storage tips, substitutions, make-ahead notes…">${escH(p.notes||'')}</textarea>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 4px">
+          ${allIngr.length?`<span class="meta-chip">${allIngr.length} ingredient${allIngr.length!==1?'s':''}</span>`:''}
+          ${(p.steps||[]).length?`<span class="meta-chip">${(p.steps||[]).length} step${(p.steps||[]).length!==1?'s':''}</span>`:''}
+          ${sectionCount>1?`<span class="meta-chip">${sectionCount} ingredient sections</span>`:''}
+        </div>
+
+        <button class="btn btn-terra btn-full btn-lg" style="margin-top:16px" onclick="saveFromPreview()">Save Recipe</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePreview()">← Back to Edit</button>
       </div>
     </div>`;
