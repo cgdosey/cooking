@@ -1659,11 +1659,18 @@ function renderAdd(){
   let pasteResult='';
   if(f.parsedSteps!==null){
     if(f.parsedSteps.length){
-      const iLen=(f.parsedIngr||[]).length;
+      // parsedIngr is [{section,items}]
+      const allIngr=(f.parsedIngr||[]).flatMap(s=>s.items||[]);
+      const iLen=allIngr.length;
+      const sectionCount=(f.parsedIngr||[]).filter(s=>s.items&&s.items.length).length;
+      const ingrPreview=(f.parsedIngr||[]).map(sec=>{
+        const hdr=sectionCount>1&&!/^ingredients$/i.test(sec.section)?`<div style="font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);margin:6px 0 2px">${escH(sec.section)}</div>`:'';
+        return hdr+(sec.items||[]).slice(0,4).map(i=>escH(i)).join('<br>');
+      }).join('');
       pasteResult=`
         <div style="margin-bottom:12px">
-          <div class="slabel" style="margin-bottom:8px">${iLen} ingredients detected</div>
-          ${iLen?`<div style="background:var(--bg-2);border-radius:10px;padding:12px 14px;font-size:.86rem;color:var(--text-2);line-height:1.7">${(f.parsedIngr||[]).slice(0,8).map(i=>escH(i)).join('<br>')}</div>`:''}
+          <div class="slabel" style="margin-bottom:8px">${iLen} ingredient${iLen!==1?'s':''} detected${sectionCount>1?` in ${sectionCount} sections`:''}</div>
+          ${iLen?`<div style="background:var(--bg-2);border-radius:10px;padding:12px 14px;font-size:.86rem;color:var(--text-2);line-height:1.7">${ingrPreview}</div>`:''}
         </div>
         <div class="slabel" style="margin-bottom:8px">${f.parsedSteps.length} steps detected</div>
         ${f.parsedSteps.slice(0,4).map((s,i)=>`
@@ -1931,6 +1938,41 @@ async function callGroq(images,prompt){
   throw new Error(lastErr||'All Groq models failed');
 }
 
+// Convert [{section,items}] or flat string[] → textarea text with "--- Section" markers
+function buildIngrText(ingredients){
+  if(!ingredients||!ingredients.length)return'';
+  // Flat string array (fallback)
+  if(typeof ingredients[0]==='string'){
+    return ingredients.join('\n');
+  }
+  // Sectioned array
+  const sections=ingredients.filter(s=>s&&s.items&&s.items.length);
+  if(sections.length===1&&/^ingredients$/i.test(sections[0].section||'')){
+    return sections[0].items.join('\n');
+  }
+  return sections.map(s=>{
+    const header=s.section&&!/^ingredients$/i.test(s.section)?`--- ${s.section}\n`:'';
+    return header+(s.items||[]).join('\n');
+  }).join('\n');
+}
+
+// Parse textarea text (with optional "--- Section" markers) → [{section,items}]
+function parseIngrText(text){
+  const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const sections=[];
+  let cur={section:'Ingredients',items:[]};
+  for(const l of lines){
+    if(l.startsWith('---')){
+      if(cur.items.length)sections.push({...cur});
+      cur={section:l.replace(/^-+\s*/,'').trim()||'Ingredients',items:[]};
+    }else{
+      cur.items.push(l);
+    }
+  }
+  if(cur.items.length)sections.push({...cur});
+  return sections.length?sections:[{section:'Ingredients',items:[]}];
+}
+
 function parseGroqJSON(raw){
   // Strip markdown fences
   let s=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
@@ -1973,27 +2015,33 @@ async function scanExtractWithGroq(){
     // Compress all images — send together so AI sees the full recipe context
     const compressed=await Promise.all(scanForm.images.map(d=>compressForAPI(d)));
     const n=compressed.length;
-    const prompt=`You are a recipe extraction assistant. ${n>1?`These are ${n} pages of the same recipe, in order.`:'This is a recipe.'} Read EVERY word on ${n>1?'all pages':'the image'} carefully — ingredients list, step numbers, quantities, everything.
+    const prompt=`You are a recipe extraction assistant. ${n>1?`These are ${n} pages of the same recipe, in order.`:'This is a recipe.'} Read EVERY word on ${n>1?'all pages':'the image'} carefully.
 
-Your task: extract the COMPLETE recipe exactly as written. Do not skip, summarise, or reorder anything.
+Extract the COMPLETE recipe. Do not skip, summarise, or reorder anything.
 
 Rules:
+- If the ingredients are grouped into sections (e.g. "For the dough", "For the sauce", "Topping"), preserve those sections exactly
 - Include ALL ingredients with exact quantities (e.g. "450g strong bread flour", "1¼ tsp fine sea salt")
-- Include ALL steps in the correct order, with complete text — do not split one step into multiple or merge steps
-- The steps must follow the numbered/ordered sequence shown in the image(s)
+- Include ALL steps in the correct order with complete text
+- Steps must follow the numbered/ordered sequence shown
 
-Return ONLY this JSON, nothing else, no markdown fences:
-{"name":"Full Recipe Name","ingredients":["quantity + ingredient, one per item"],"steps":["Full text of step 1 exactly as written.","Full text of step 2 exactly as written."]}`;
+Return ONLY this JSON, nothing else, no markdown:
+{"name":"Recipe Name","ingredients":[{"section":"For the Dough","items":["450g flour","7g yeast"]},{"section":"For the Sauce","items":["2 tbsp olive oil"]}],"steps":["Full step 1.","Full step 2."]}
+
+If there is only one ingredient group with no section heading, use: {"section":"Ingredients","items":[...]}`;
 
     const data=await callGroq(compressed,prompt);
     const raw=data.choices?.[0]?.message?.content||'';
     const recipe=parseGroqJSON(raw);
 
+    // ingredients can be [{section,items}] or flat string[]
+    const ingrText=buildIngrText(recipe.ingredients||[]);
+
     scanForm={
       ...scanForm,
       status:'editing',
       name:recipe.name||'Scanned Recipe',
-      ingrText:(recipe.ingredients||[]).join('\n'),
+      ingrText,
       steps:(recipe.steps||[]).map(s=>({
         instructions:s,timerMinutes:detectTimer(s),
         title:summarizeStepTitle(s),phase:'',timerLabel:'',image:''
@@ -2012,7 +2060,7 @@ function saveScanRecipe(){
   const name=document.getElementById('scan-name')?.value.trim();
   if(!name){showToast('Please enter a recipe name');return;}
   const ingrText=document.getElementById('scan-ingr')?.value.trim()||'';
-  const ingredients=ingrText?[{section:'Ingredients',items:ingrText.split('\n').map(l=>l.trim()).filter(Boolean)}]:[];
+  const ingredients=parseIngrText(ingrText);
   const stepEls=document.querySelectorAll('#scan-steps-list .scan-step-ta');
   const steps=Array.from(stepEls).map(el=>{
     const inst=el.value.trim();
@@ -2219,19 +2267,33 @@ function parseRecipeText(text){
     stepsText=text;
   }
 
-  // Parse ingredients — filter lines that look like ingredient quantities/names
-  const ingrLineRx=/^(?:\d[\d\/\s¼½¾⅓⅔⅛]*\s*(?:g|kg|ml|l|cup|tbsp|tsp|oz|lb|large|medium|small|clove|bunch|slice|piece|pinch|dash|handful|can|package|pkg|stick)?\s+.{3,}|[-•*·✓✔▪▸→]\s*.{3,}|[A-Z].{5,})/;
-  const ingredients=ingrText.split('\n')
-    .map(l=>l.replace(ingrRx,'').replace(/^[-•*·✓✔▪▸→]\s*/,'').trim())
+  // Parse ingredients with section detection
+  // Section header patterns: "For the Dough:", "Dough:", "--- Sauce", lines ending in ":" that are short
+  const sectionHeaderRx=/^(?:---\s*.+|for the .+|(?:[A-Z][a-zA-Z\s]{2,30}):)\s*$/i;
+  const ingrLines=ingrText.split('\n')
+    .map(l=>l.replace(ingrRx,'').trim())
     .filter(l=>{
-      if(l.length<3)return false;
-      if(/^(?:ingredients?|directions?|instructions?|for the \w+):?$/i.test(l))return false;
-      // Reject lines that look like navigation/website junk
+      if(l.length<2)return false;
       if(/sign up|subscribe|newsletter|©|http/i.test(l))return false;
-      // Accept if it has a quantity or looks like an ingredient name
+      if(/^(?:ingredients?)\s*:?\s*$/i.test(l))return false;
       return true;
-    })
-    .filter(l=>l.length>2);
+    });
+
+  // Build sectioned ingredients
+  const ingrSections=[];
+  let curSection={section:'Ingredients',items:[]};
+  for(const l of ingrLines){
+    const cleanL=l.replace(/^[-•*·✓✔▪▸→]\s*/,'').trim();
+    if(!cleanL)continue;
+    if(sectionHeaderRx.test(cleanL)&&cleanL.length<60){
+      if(curSection.items.length)ingrSections.push({...curSection});
+      curSection={section:cleanL.replace(/^---\s*/,'').replace(/:$/,'').trim(),items:[]};
+    }else{
+      curSection.items.push(cleanL);
+    }
+  }
+  if(curSection.items.length)ingrSections.push({...curSection});
+  const ingredients=ingrSections.length?ingrSections:[{section:'Ingredients',items:[]}];
 
   // Parse steps — numbered list first, then paragraphs, then capital sentences
   let rawSteps=[];
@@ -2264,7 +2326,8 @@ function saveParsed(){
   const name=document.getElementById('paste-name')?.value.trim();
   if(!name){showToast('Please enter a recipe name');return;}
   const f=state.addForm;
-  const ingredients=f.parsedIngr.length?[{section:'Ingredients',items:f.parsedIngr}]:[];
+  // parsedIngr is now [{section,items}] already
+  const ingredients=f.parsedIngr.length?f.parsedIngr:[];
   recipes.push({id:nextId++,name,description:'',image:'',yield:'',difficulty:'Intermediate',ingredients,cookware:[],steps:(f.parsedSteps||[]).map(s=>({...s,image:''}))});
   saveRecipes();resetForm();go('list');showToast('Recipe saved!');
 }
@@ -2359,7 +2422,23 @@ function parseJSONLD(json){
     if(typeof i==='string')return i.replace(/<[^>]+>/g,'').trim();
     return(i.name||i.text||i['@value']||'').replace(/<[^>]+>/g,'').trim();
   }).filter(s=>s.length>1);
-  const ingredients=rawIngr.length?[{section:'Ingredients',items:rawIngr}]:[];
+  // Detect inline section headers (e.g. "For the sauce:" or "Dough:" as a flat ingredient entry)
+  const inlineSectionRx=/^(?:for the .{2,40}|(?:[A-Z][a-zA-Z\s]{1,30})):?\s*$/i;
+  const ingredients=(()=>{
+    if(!rawIngr.length)return[];
+    const sections=[];
+    let cur={section:'Ingredients',items:[]};
+    for(const line of rawIngr){
+      if(inlineSectionRx.test(line)&&line.length<50){
+        if(cur.items.length)sections.push({...cur});
+        cur={section:line.replace(/:$/,'').trim(),items:[]};
+      }else{
+        cur.items.push(line);
+      }
+    }
+    if(cur.items.length)sections.push({...cur});
+    return sections.length?sections:[{section:'Ingredients',items:rawIngr}];
+  })();
   // Steps
   // Helper: strip HTML tags from instruction text
   function stripTags(s){return(s||'').replace(/<[^>]+>/g,' ').replace(/\s{2,}/g,' ').trim();}
