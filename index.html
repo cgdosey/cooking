@@ -1291,8 +1291,6 @@ function renderDetail(){
   }else if(state.detailTab==='cookware'){
     const items=(r.cookware||[]);
     tabContent=items.length?`<div class="tab-content">${items.map(c=>`<div class="cw-item"><span class="cw-dot"></span>${escH(c)}</div>`).join('')}</div>`:`<div style="padding:16px 18px;color:var(--text-3);font-size:.9rem">No cookware listed.</div>`;
-  }else if(state.detailTab==='notes'){
-    tabContent=`<div class="tab-content"><div style="font-size:.9rem;line-height:1.8;color:var(--text-1);white-space:pre-wrap">${escH(r.notes||'')}</div></div>`;
   }else{
     // Group steps by phase and write out in full
     const groups=[];
@@ -1349,9 +1347,12 @@ function renderDetail(){
         <button class="sub-tab ${state.detailTab==='ingredients'?'active':''}" onclick="setDTab('ingredients')">Ingredients</button>
         <button class="sub-tab ${state.detailTab==='cookware'?'active':''}" onclick="setDTab('cookware')">Cookware</button>
         <button class="sub-tab ${state.detailTab==='steps'?'active':''}" onclick="setDTab('steps')">Steps</button>
-        ${r.notes?`<button class="sub-tab ${state.detailTab==='notes'?'active':''}" onclick="setDTab('notes')">Notes</button>`:''}
       </div>
       ${tabContent}
+      ${r.notes?`<div style="margin:0 18px 4px">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);padding:16px 0 8px">Chef's Notes</div>
+        <div style="background:var(--terra-bg);border-radius:14px;padding:14px 16px;font-size:.9rem;line-height:1.85;color:var(--text-1);white-space:pre-wrap;border-left:3px solid var(--terra)">${escH(r.notes)}</div>
+      </div>`:''}
       <div class="detail-cta">
         <button class="btn btn-outline btn-full" onclick="addToShopList(${r.id})">Add ingredients to list</button>
         <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${r.id}})">Start cooking</button>
@@ -3027,28 +3028,89 @@ function closePreview(){
   state.view='add';render();
 }
 
-function saveFromPreview(){
+// Stage metadata edits from the details screen into previewData, then show full recipe preview
+function stageAndPreviewFull(){
   const name=document.getElementById('preview-name')?.value.trim();
   if(!name){showToast('Please enter a recipe name');return;}
   const p=state.previewData;
-  const prepTime=document.getElementById('pv-prep')?.value.trim()||'';
-  const cookTime=document.getElementById('pv-cook')?.value.trim()||'';
-  const totalTime=document.getElementById('pv-total')?.value.trim()||'';
-  const course=document.getElementById('pv-course')?.value||'';
-  const cuisine=document.getElementById('pv-cuisine')?.value.trim()||'';
-  const servings=document.getElementById('pv-servings')?.value.trim()||'';
-  const calories=document.getElementById('pv-calories')?.value.trim()||'';
-  const notes=document.getElementById('pv-notes')?.value.trim()||'';
+  p.name=name;
+  p.prepTime=document.getElementById('pv-prep')?.value.trim()||'';
+  p.cookTime=document.getElementById('pv-cook')?.value.trim()||'';
+  p.totalTime=document.getElementById('pv-total')?.value.trim()||'';
+  p.course=document.getElementById('pv-course')?.value||'';
+  p.cuisine=document.getElementById('pv-cuisine')?.value.trim()||'';
+  p.yield=document.getElementById('pv-servings')?.value.trim()||p.yield||'';
+  p.calories=document.getElementById('pv-calories')?.value.trim()||'';
+  p.notes=document.getElementById('pv-notes')?.value.trim()||'';
+  state.view='fullpreview';render();
+}
+
+function closeFullPreview(){
+  state.view='preview';render();
+}
+
+function renderFullPreview(){
+  const p=state.previewData;
+  if(!p){go('add');return;}
+  const allIngr=(p.ingredients||[]).flatMap(s=>s.items||[]);
+  const sectionCount=(p.ingredients||[]).filter(s=>s.items&&s.items.length).length;
+  const ingrHTML=(p.ingredients||[]).map(sec=>{
+    const hdr=sectionCount>1&&!/^ingredients$/i.test(sec.section||'')
+      ?`<div style="font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);margin:12px 0 4px;padding-top:4px">${escH(sec.section)}</div>`
+      :'';
+    return hdr+(sec.items||[]).map(item=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:.9rem;color:var(--text-1)">${escH(item)}</div>`).join('');
+  }).join('');
+  const stepsHTML=(p.steps||[]).map((s,i)=>`
+    <div style="margin-bottom:14px;background:var(--bg-2);border-radius:12px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${s.instructions?'8':'0'}px">
+        <span style="background:var(--terra);color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0">${i+1}</span>
+        ${s.title?`<span style="font-weight:600;font-size:.9rem">${escH(s.title)}</span>`:''}
+        ${s.timerMinutes?`<span style="margin-left:auto;background:var(--terra-bg,#FFF5F0);color:var(--terra);font-size:.74rem;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap">${s.timerMinutes} min</span>`:''}
+      </div>
+      ${s.instructions?`<div style="font-size:.9rem;line-height:1.7;color:var(--text-1)">${escH(s.instructions)}</div>`:''}
+    </div>`).join('');
+  document.getElementById('app').innerHTML=`
+    <div class="shell">
+      <div class="topbar"><div class="topbar-row">
+        <button class="ibtn" onclick="closeFullPreview()">${I.back}</button>
+        <div class="topbar-title" style="font-size:1.05rem">Recipe Preview</div>
+        <div style="width:40px"></div>
+      </div></div>
+      <div class="add-page" style="padding-bottom:110px">
+        ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:18px" onerror="this.remove()">`:''}
+        <div style="font-size:1.25rem;font-weight:800;letter-spacing:-.3px;margin-bottom:12px">${escH(p.name)}</div>
+        ${allIngr.length?`
+        <div class="slabel" style="margin-bottom:8px">${allIngr.length} Ingredient${allIngr.length!==1?'s':''}${sectionCount>1?` <span style="font-weight:400;text-transform:none;font-size:.76rem;color:var(--text-3)">· ${sectionCount} sections</span>`:''}</div>
+        <div style="background:var(--bg-2);border-radius:12px;padding:10px 16px 6px;margin-bottom:20px">${ingrHTML}</div>`:''}
+        <div class="slabel" style="margin-bottom:10px">${(p.steps||[]).length} Step${(p.steps||[]).length!==1?'s':''}</div>
+        ${stepsHTML}
+        ${p.notes?`<div class="slabel" style="margin-top:6px;margin-bottom:8px">Notes</div><div style="background:var(--bg-2);border-radius:12px;padding:14px 16px;font-size:.9rem;line-height:1.8;white-space:pre-wrap;margin-bottom:20px">${escH(p.notes)}</div>`:''}
+        <button class="btn btn-terra btn-full btn-lg" style="margin-top:12px" onclick="saveFromPreview()">Save Recipe</button>
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closeFullPreview()">← Back to Details</button>
+      </div>
+    </div>`;
+}
+
+function saveFromPreview(){
+  const p=state.previewData;
+  if(!p||!p.name){showToast('Please enter a recipe name');return;}
   recipes.push({
-    id:nextId++,name,
+    id:nextId++,
+    name:p.name,
     description:p.description||'',
     image:p.image||'',
-    yield:servings||p.yield||'',
+    yield:p.yield||'',
     difficulty:p.difficulty||'Intermediate',
     cookware:p.cookware||[],
     ingredients:p.ingredients||[],
     steps:(p.steps||[]).map(s=>({...s})),
-    prepTime,cookTime,totalTime,course,cuisine,calories,notes
+    prepTime:p.prepTime||'',
+    cookTime:p.cookTime||'',
+    totalTime:p.totalTime||'',
+    course:p.course||'',
+    cuisine:p.cuisine||'',
+    calories:p.calories||'',
+    notes:p.notes||''
   });
   saveRecipes();
   resetForm();
@@ -3057,9 +3119,48 @@ function saveFromPreview(){
   go('list');showToast('Recipe saved!');
 }
 
+// Auto-fill missing metadata fields via Groq — runs once when preview opens
+async function estimateMissingMeta(p){
+  const missing=!p.course||!p.cuisine||!p.calories||!p.prepTime;
+  if(!missing||p._metaEstimated)return;
+  p._metaEstimated=true; // prevent re-running
+  try{
+    const ingrList=(p.ingredients||[]).flatMap(s=>s.items||[]).slice(0,20).join(', ');
+    const stepSnippet=(p.steps||[]).slice(0,3).map(s=>s.instructions).join(' ').substring(0,600);
+    const prompt=`Given this recipe, fill in ONLY the missing fields. Return ONLY JSON, no markdown:
+{"course":"Dinner","cuisine":"American","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min","calories":"320","notes":""}
+
+Recipe name: ${p.name}
+Ingredients (sample): ${ingrList}
+Steps (sample): ${stepSnippet}
+
+Rules:
+- course: one of Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Appetizer, Side Dish, Soup, Salad
+- cuisine: e.g. American, Italian, Mexican, Asian, Mediterranean — infer from the recipe
+- prepTime/cookTime/totalTime: estimate from steps if not known, format as "X min" or "X hr Y min"
+- calories: estimate per serving as a number string only, e.g. "320"
+- notes: leave empty string "" — do not invent notes
+- Only provide fields that are currently empty: ${[!p.course&&'course',!p.cuisine&&'cuisine',!p.prepTime&&'prepTime',!p.cookTime&&'cookTime',!p.totalTime&&'totalTime',!p.calories&&'calories'].filter(Boolean).join(', ')}`;
+    const data=await callGroq([],prompt);
+    const raw=data.choices?.[0]?.message?.content||'';
+    const est=parseGroqJSON(raw);
+    if(!est)return;
+    if(!p.course&&est.course)p.course=est.course;
+    if(!p.cuisine&&est.cuisine)p.cuisine=est.cuisine;
+    if(!p.prepTime&&est.prepTime)p.prepTime=est.prepTime;
+    if(!p.cookTime&&est.cookTime)p.cookTime=est.cookTime;
+    if(!p.totalTime&&est.totalTime)p.totalTime=est.totalTime;
+    if(!p.calories&&est.calories)p.calories=String(est.calories).replace(/[^\d]/g,'');
+    // Re-render to show the filled values
+    if(state.view==='preview')renderPreview();
+  }catch(e){/* silently fail — user can fill manually */}
+}
+
 function renderPreview(){
   const p=state.previewData;
   if(!p){go('add');return;}
+  // Kick off background estimation for any missing fields
+  estimateMissingMeta(p);
   const allIngr=(p.ingredients||[]).flatMap(s=>s.items||[]);
   const sectionCount=(p.ingredients||[]).filter(s=>s.items&&s.items.length).length;
 
@@ -3127,7 +3228,7 @@ function renderPreview(){
           ${sectionCount>1?`<span class="meta-chip">${sectionCount} ingredient sections</span>`:''}
         </div>
 
-        <button class="btn btn-terra btn-full btn-lg" style="margin-top:16px" onclick="saveFromPreview()">Save Recipe</button>
+        <button class="btn btn-terra btn-full btn-lg" style="margin-top:16px" onclick="stageAndPreviewFull()">Preview Recipe →</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePreview()">← Back to Edit</button>
       </div>
     </div>`;
@@ -3143,6 +3244,7 @@ function render(){
   if(state.view==='detail'){renderDetail();return;}
   if(state.view==='add'){renderAdd();return;}
   if(state.view==='preview'){renderPreview();return;}
+  if(state.view==='fullpreview'){renderFullPreview();return;}
   if(state.tab==='shoplist'){renderShopList();return;}
   if(state.tab==='timers'){renderTimers();return;}
   renderList();
