@@ -2055,7 +2055,8 @@ Important: ignore any photos or images within the recipe — only extract text (
 
     // If ingredients came back empty, do a dedicated second pass just for ingredients.
     // This handles two-column cookbook layouts where the model misses the left column.
-    const totalItems=(recipe.ingredients||[]).reduce((n,s)=>n+(Array.isArray(s.items)?s.items.length:1),0);
+    const ingrs=Array.isArray(recipe.ingredients)?recipe.ingredients:[];
+    const totalItems=ingrs.reduce((n,s)=>n+(Array.isArray(s.items)?s.items.length:1),0);
     if(totalItems<2){
       try{
         const ingrPrompt=`Look at this recipe image carefully. Your ONLY job is to find and list ALL the ingredients.
