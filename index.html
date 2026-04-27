@@ -2588,20 +2588,38 @@ async function tryJina(url){
   return t;
 }
 
+// Isolate the recipe card section from a full page markdown dump
+function extractRecipeSection(text){
+  // Most recipe sites: recipe card appears after the blog post
+  // Look for an Ingredients heading (## Ingredients, **Ingredients**, etc.)
+  const ingrHdRx=/\n(?:#{1,4}\s*|(?:\*{1,2})?)ingredients?(?:\*{1,2})?\s*\n/i;
+  const m=text.match(ingrHdRx);
+  if(m){
+    // Take from just before Ingredients heading up to 7000 chars
+    const start=Math.max(0,m.index-200);
+    return text.substring(start,start+7000);
+  }
+  // No heading found — use the last 7000 chars (recipe cards are usually near the end)
+  return text.length>7000?text.substring(text.length-7000):text;
+}
+
 // Use Groq to extract a recipe from plain text/markdown (text-only, no image)
 async function groqExtractFromText(text){
-  const prompt=`Extract the complete recipe from the text below. Return ONLY this JSON, nothing else, no markdown fences:
-{"name":"Recipe Name","yield":"4 servings","description":"Brief description","ingredients":[{"section":"Ingredients","items":["2 cups flour","1 tsp salt"]},{"section":"For the Sauce","items":["1 cup tomatoes"]}],"steps":["Full step 1 text.","Full step 2 text."]}
+  const section=extractRecipeSection(text);
+  const prompt=`You are extracting data from a RECIPE CARD section of a food blog page. The text below is only the recipe card — ignore any surrounding blog narrative, tips, or stories.
+
+Extract the structured recipe. Return ONLY this JSON, nothing else, no markdown fences:
+{"name":"Recipe Name","yield":"8 people","description":"One sentence description","ingredients":[{"section":"For the Corn Stock","items":["4 cups chicken broth","1½ cups milk"]},{"section":"For the Chowder","items":["2 tbsp butter","3 ears corn"]}],"steps":["Step 1 full text.","Step 2 full text."]}
 
 Rules:
-- Include ALL ingredients with exact quantities
-- If ingredients are grouped into sections (e.g. "For the Corn Stock:", "For the Chowder:"), use a separate section object for each
-- Include ALL steps in order with their full text
-- Put serving/yield info (e.g. "Serves 8") in the yield field, NOT in ingredients
-- Do not include rating, author, or comments in the output
+- ingredients: only actual food items with quantities — NOT tips, blog text, or meta info
+- steps: only real cooking instructions (numbered steps) — NOT tips, Q&A, storage notes, or blog prose
+- If ingredients have section headers (e.g. "For the Corn Stock:", "For the Chowder:"), preserve them as separate sections
+- yield: serving size like "8 people" or "4 servings"
+- Omit any step that is a tip, blog aside, or meta information (e.g. "How to remove corn silk", "cool summer nights", "Prep Time: 15 mins")
 
-TEXT:
-${text.substring(0,12000)}`;
+RECIPE CARD TEXT:
+${section}`;
   const data=await callGroq([],prompt);
   const raw=data.choices?.[0]?.message?.content||'';
   return parseGroqJSON(raw);
