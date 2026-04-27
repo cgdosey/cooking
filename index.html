@@ -2280,7 +2280,18 @@ function parseRecipe(){
   const result=parseRecipeText(text);
   state.addForm.parsedIngr=result.ingredients;
   state.addForm.parsedSteps=result.steps;
-  renderAdd();
+  if(result.steps&&result.steps.length){
+    // Stage previewData for paste and jump straight to combined preview
+    state.addForm.urlParsed={
+      name:'',image:'',description:'',yield:'',difficulty:'Intermediate',cookware:[],
+      ingredients:result.ingredients||[],
+      steps:result.steps||[],
+      prepTime:'',cookTime:'',totalTime:'',course:'',cuisine:'',calories:'',notes:''
+    };
+    jumpToPreview('paste');
+  }else{
+    renderAdd();
+  }
 }
 // Remove website chrome, navigation, ads, and social junk from pasted text
 function cleanWebJunk(text){
@@ -2754,7 +2765,7 @@ async function fetchFromURL(){
         state.addForm.urlStatus=parsed.steps.length?'success':'partial';
         state.addForm.urlError=parsed.steps.length?'':'Recipe found but steps could not be extracted. Try Paste Text.';
       }
-      renderAdd();return;
+      jumpToPreview('url');return;
     }
     const doc=new DOMParser().parseFromString(html,'text/html');
     // Try JSON-LD: regex on raw HTML first (more reliable with proxy-fetched HTML where
@@ -2931,7 +2942,7 @@ async function fetchFromURL(){
               state.addForm.urlParsed=jinaResult;
               state.addForm.urlStatus='success';
               state.addForm.urlError='';
-              renderAdd();return;
+              jumpToPreview('url');return;
             }
           }else{
             const ingrs=Array.isArray(recipe.ingredients)?recipe.ingredients:[];
@@ -2942,7 +2953,7 @@ async function fetchFromURL(){
             state.addForm.urlParsed={name:recipe.name||'',description:recipe.description||'',image:ogImage,yield:recipe.servings||recipe.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps,prepTime:recipe.prepTime||'',cookTime:recipe.cookTime||'',totalTime:recipe.totalTime||'',course:recipe.course||'',cuisine:recipe.cuisine||'',calories:recipe.calories||'',notes:recipe.notes||''};
             state.addForm.urlStatus='success';
             state.addForm.urlError='';
-            renderAdd();return;
+            jumpToPreview('url');return;
           }
         }catch(e){/* Jina failed, continue with DOM fallback */}
       }
@@ -2966,7 +2977,14 @@ async function fetchFromURL(){
     state.addForm.urlStatus='error';
     state.addForm.urlError=err.message||'Something went wrong.';
   }
-  renderAdd();
+  // Jump to combined preview on success/partial; stay in add page on error
+  const s=state.addForm.urlStatus;
+  if((s==='success'||s==='partial')&&state.addForm.urlParsed){
+    if(s==='partial')showToast('Recipe extracted — please review the steps carefully',3500);
+    jumpToPreview('url');
+  }else{
+    renderAdd();
+  }
 }
 
 function saveURLRecipe(){
@@ -2985,6 +3003,32 @@ function deleteRecipe(id){
 // ═══════════════════════════════════════
 //  RECIPE PREVIEW (before save)
 // ═══════════════════════════════════════
+
+// Jump directly to the combined Review & Save screen after URL or paste import
+function jumpToPreview(source){
+  const p=state.addForm.urlParsed;
+  if(!p){renderAdd();return;}
+  state.previewData={
+    source:source||'url',
+    name:p.name||'',
+    image:p.image||'',
+    description:p.description||'',
+    yield:p.yield||'',
+    difficulty:p.difficulty||'Intermediate',
+    cookware:p.cookware||[],
+    ingredients:p.ingredients||[],
+    steps:(p.steps||[]).map(s=>({...s})),
+    prepTime:p.prepTime||'',
+    cookTime:p.cookTime||'',
+    totalTime:p.totalTime||'',
+    course:p.course||'',
+    cuisine:p.cuisine||'',
+    calories:p.calories||'',
+    notes:p.notes||''
+  };
+  state.view='preview';render();
+}
+
 function previewURLRecipe(){
   const name=document.getElementById('url-name')?.value.trim();
   const p=state.addForm.urlParsed;
