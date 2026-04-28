@@ -1265,7 +1265,10 @@ function renderList(){
             <div class="topbar-logo"><svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><text x="6" y="17" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="rgba(255,255,255,0.5)">R</text><text x="12" y="24" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="#ffffff">R</text></svg></div>
             <span class="topbar-wordmark">Recipe Ripper</span>
           </div>
-          <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
+          <div style="display:flex;gap:4px;align-items:center">
+            <button class="ibtn" onclick="go('settings')" aria-label="Settings" title="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+            <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
+          </div>
         </div>
         <div style="padding:6px 0 4px">
           <input class="input search-box" id="search-input" type="text" dir="ltr" inputmode="search" placeholder="Search recipes…" oninput="setSearch(this.value)">
@@ -1797,7 +1800,30 @@ function resetForm(){state.addForm={...FORM_RESET};}
 // ═══════════════════════════════════════
 //  SCAN FROM PHOTO — Groq Vision
 // ═══════════════════════════════════════
-const GROQ_KEY=atob('Z3NrX3dIWXZBM0R3R3JSUU9yR1JqWWsyV0dkeWIzRll6UGlXYldreFBXYzJLWVR5OXpsR05Ea0I=');
+function getGroqKey(){return localStorage.getItem('k_groq_key')||'';}
+function saveGroqKey(k){localStorage.setItem('k_groq_key',k.trim());}
+function renderSettings(){
+  const cur=getGroqKey();
+  document.getElementById('app').innerHTML=`
+    <div class="shell">
+      <div class="topbar"><div class="topbar-row">
+        <button class="ibtn" onclick="go('list')">${I.back}</button>
+        <div class="topbar-title">Settings</div>
+        <div style="width:40px"></div>
+      </div></div>
+      <div class="add-page" style="padding-bottom:40px">
+        <div class="slabel" style="margin-bottom:8px">Groq API Key</div>
+        <p style="font-size:.85rem;color:var(--text-2);margin:0 0 12px;line-height:1.6">Required for importing recipes from URLs and reading photos. Get a free key at <a href="https://console.groq.com" target="_blank" style="color:var(--terra)">console.groq.com</a> → API Keys.</p>
+        <input class="input" id="s-groq-key" type="password" value="${escH(cur)}" placeholder="gsk_…" style="font-family:monospace;font-size:.85rem"/>
+        <button class="btn btn-terra btn-full" style="margin-top:12px" onclick="
+          const v=document.getElementById('s-groq-key').value.trim();
+          if(!v){showToast('Please enter a key');return;}
+          saveGroqKey(v);showToast('API key saved ✓');go('list');
+        ">Save Key</button>
+        ${cur?`<button class="btn btn-ghost btn-full" style="margin-top:8px;color:var(--danger)" onclick="localStorage.removeItem('k_groq_key');showToast('Key removed');go('list')">Remove Key</button>`:''}
+      </div>
+    </div>`;
+}
 
 let scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};
 
@@ -1931,31 +1957,34 @@ async function processScanFiles(fileList){
 }
 
 const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct'];
+// Paste your Cloudflare Worker URL here after deploying groq-proxy-worker.js
+// e.g. 'https://recipe-ripper.cgdosey.workers.dev'
+const GROQ_PROXY='https://lingering-sun-b693.christiangodsey.workers.dev';
 
 async function callGroq(images,prompt){
-  const key=GROQ_KEY;
+  // Use proxy if configured (key stays server-side), otherwise fall back to user's own key
+  const proxy=GROQ_PROXY.trim();
+  const key=proxy?'':getGroqKey();
+  if(!proxy&&!key)throw new Error('NO_KEY');
+  const endpoint=proxy||'https://api.groq.com/openai/v1/chat/completions';
+  const authHeader=proxy?{}:{'Authorization':`Bearer ${key}`};
   let lastErr='';
-  const body=JSON.stringify({messages:[{role:'user',content:[
-    ...images.map(img=>({type:'image_url',image_url:{url:img}})),
-    {type:'text',text:prompt}
-  ]}],temperature:0.1,max_tokens:2048});
-  console.log('→ Groq request size:',Math.round(body.length/1024)+'KB','images:',images.length);
 
   for(const model of GROQ_MODELS){
     try{
-      console.log('→ trying model:',model);
+      console.log('→ trying model:',model,'via',proxy?'proxy':'direct');
       const payload=JSON.stringify({model,messages:[{role:'user',content:[
         ...images.map(img=>({type:'image_url',image_url:{url:img}})),
         {type:'text',text:prompt}
       ]}],temperature:0.1,max_tokens:2048});
 
       const controller=new AbortController();
-      const tid=setTimeout(()=>controller.abort(),90000); // 90s timeout
+      const tid=setTimeout(()=>controller.abort(),90000);
       let resp;
       try{
-        resp=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+        resp=await fetch(endpoint,{
           method:'POST',
-          headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+          headers:{'Content-Type':'application/json',...authHeader},
           body:payload,
           signal:controller.signal
         });
@@ -2033,14 +2062,14 @@ function parseGroqJSON(raw){
 }
 
 async function scanExtractWithGroq(){
-  if(!GROQ_KEY){showToast('Photo scanning is not configured');return;}
+  if(!GROQ_PROXY.trim()&&!getGroqKey()){state.view='settings';render();return;}
   if(!scanForm.images.length){showToast('Add at least one photo first');return;}
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
     // Quick reachability check — fail fast if network blocks Groq
     try{
       const ping=await fetch('https://api.groq.com/openai/v1/models',{
-        headers:{'Authorization':`Bearer ${GROQ_KEY}`},
+        headers:{'Authorization':`Bearer ${getGroqKey()}`},
         signal:AbortSignal.timeout(8000)
       });
       if(!ping.ok&&ping.status===401)throw new Error('Invalid API key');
@@ -3213,6 +3242,7 @@ async function fetchFromURL(){
       state.addForm.urlError=finalSteps.length?'No structured recipe found — extracted from page text. Please review the steps carefully.':'No recipe content detected. The site may block automated access. Try copying the text and using Paste Text.';
     }
   }catch(err){
+    if(err.message==='NO_KEY'){state.view='settings';render();return;}
     state.addForm.urlStatus='error';
     state.addForm.urlError=err.message||'Something went wrong.';
   }
@@ -3520,6 +3550,7 @@ function render(){
   if(state.view==='detail'){renderDetail();return;}
   if(state.view==='add'){renderAdd();return;}
   if(state.view==='preview'){renderPreview();return;}
+  if(state.view==='settings'){renderSettings();return;}
   if(state.tab==='shoplist'){renderShopList();return;}
   if(state.tab==='timers'){renderTimers();return;}
   renderList();
