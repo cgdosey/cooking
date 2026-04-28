@@ -1244,7 +1244,10 @@ function cardsHTML(q){
       <div class="rc-body">
         <div class="rc-name">${escH(r.name)}</div>
         ${metaStr?`<div class="rc-meta">${I.clock} ${escH(metaStr)}</div>`:''}
-        ${r.difficulty?`<span class="rc-chip">${escH(r.difficulty)}</span>`:''}
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px">
+          ${r.difficulty?`<span class="rc-chip">${escH(r.difficulty)}</span>`:''}
+          ${r.calories?`<span class="rc-chip" style="background:var(--bg-2);color:var(--text-2)">${escH(r.calories)} cal/serving</span>`:''}
+        </div>
       </div>
     </div>`;
   }).join(''):(q?`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No results</h3><p>No recipes match "${escH(q)}".</p></div>`:`<div class="empty"><div class="empty-icon">${I.utensils}</div><h3>No recipes yet</h3><p>Import from URL or add one manually.</p></div>`);
@@ -1959,6 +1962,10 @@ const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct'];
 // Paste your Cloudflare Worker URL here after deploying groq-proxy-worker.js
 // e.g. 'https://recipe-ripper.cgdosey.workers.dev'
 const GROQ_PROXY='https://lingering-sun-b693.christiangodsey.workers.dev';
+
+// USDA FoodData Central API key — free at https://fdc.nal.usda.gov/api-guide.html
+// DEMO_KEY works for personal/low-traffic use (30 req/hr per IP).
+const USDA_KEY='DEMO_KEY';
 
 async function callGroq(images,prompt){
   // Use proxy if configured (key stays server-side), otherwise fall back to user's own key
@@ -3404,41 +3411,145 @@ function saveFromPreview(){
   go('list');showToast('Recipe saved!');
 }
 
-// Auto-fill missing metadata fields via Groq — runs once when preview opens
-async function estimateMissingMeta(p){
-  const missing=!p.course||!p.cuisine||!p.calories||!p.prepTime;
-  if(!missing||p._metaEstimated)return;
-  p._metaEstimated=true; // prevent re-running
-  try{
-    const ingrList=(p.ingredients||[]).flatMap(s=>s.items||[]).slice(0,20).join(', ');
-    const stepSnippet=(p.steps||[]).slice(0,3).map(s=>s.instructions).join(' ').substring(0,600);
-    const prompt=`Given this recipe, fill in ONLY the missing fields. Return ONLY JSON, no markdown:
-{"course":"Dinner","cuisine":"American","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min","calories":"320","notes":""}
+// ═══════════════════════════════════════
+//  CALORIE CALCULATION  (USDA + Groq fallback)
+// ═══════════════════════════════════════
 
+// Step 1: Ask Groq to parse every ingredient into {item, grams} for the full recipe batch.
+// Groq handles unit conversions ("1 cup flour" → 120g, "3 cloves garlic" → 9g, etc.)
+async function parseIngredientsToGrams(ingredients){
+  const allItems=(ingredients||[]).flatMap(s=>s.items||[]);
+  if(!allItems.length)return[];
+  const prompt=`Convert each recipe ingredient to its estimated weight in grams for the ENTIRE recipe batch (not per serving).
+Return ONLY a JSON array, nothing else:
+[{"item":"all-purpose flour","grams":240},{"item":"olive oil","grams":28}]
+Rules:
+- Use standard densities: 1 cup flour≈120g, 1 cup sugar≈200g, 1 cup butter≈227g, 1 cup water/milk≈240g, 1 tbsp oil≈14g, 1 tbsp butter≈14g, 1 tsp≈5g, 1 tbsp≈15g
+- Whole items: 1 large egg≈50g, 1 clove garlic≈3g, 1 medium onion≈150g, 1 lemon≈100g, 1 can (15oz)≈425g
+- Use simple USDA-searchable names: "all-purpose flour" not "plain flour", "whole milk" not "full-fat milk", "unsalted butter" not "butter"
+- Include every ingredient even if calories are minimal
+- If a quantity is a range (e.g. "2–3 tbsp"), use the midpoint
+Ingredients:
+${allItems.join('\n')}`;
+  try{
+    const data=await callGroq([],prompt);
+    const raw=data.choices?.[0]?.message?.content||'';
+    const result=parseGroqJSON(raw);
+    return Array.isArray(result)?result:[];
+  }catch(e){return[];}
+}
+
+// Step 2: Look up kcal per 100g from the USDA FoodData Central database for one ingredient.
+async function usdaCalPer100g(itemName){
+  try{
+    const url=`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(itemName)}&dataType=SR%20Legacy,Foundation&pageSize=3&api_key=${USDA_KEY}`;
+    const r=await fetch(url,{signal:AbortSignal.timeout(7000)});
+    if(!r.ok)return null;
+    const d=await r.json();
+    const food=d.foods?.[0];
+    if(!food)return null;
+    const nut=food.foodNutrients?.find(n=>n.nutrientId===1008||(n.nutrientName||'').toLowerCase().startsWith('energy'));
+    return nut?.value??null;
+  }catch(e){return null;}
+}
+
+// Step 3: Full pipeline — parse → USDA lookup → Groq fallback → per-serving total.
+// Returns {calories: "320", source: "usda"|"mixed"|"ai"} or null on failure.
+async function calculateCalories(p){
+  const servings=parseFloat((p.yield||'').match(/[\d.]+/)?.[0]||'0')||1;
+
+  // Parse all ingredients to grams
+  const parsed=await parseIngredientsToGrams(p.ingredients);
+  if(!parsed.length)return null;
+
+  // USDA lookups in small batches to avoid overwhelming the API
+  let totalCal=0,usdaHits=0;
+  const groqFallback=[];
+  const BATCH=5;
+  for(let i=0;i<parsed.length;i+=BATCH){
+    const batch=parsed.slice(i,i+BATCH);
+    const cals=await Promise.all(batch.map(async({item,grams})=>{
+      const calPer100g=await usdaCalPer100g(item);
+      if(calPer100g!==null){usdaHits++;return Math.round((grams*calPer100g)/100);}
+      groqFallback.push({item,grams});
+      return 0;
+    }));
+    totalCal+=cals.reduce((a,b)=>a+b,0);
+  }
+
+  // Groq fallback for anything USDA didn't recognise
+  if(groqFallback.length){
+    try{
+      const fbPrompt=`Estimate the total calorie content for these ingredients (quantities are grams for the ENTIRE recipe batch, not per serving).
+Return ONLY a single integer — the total kcal for all items combined. No explanation, no text.
+${groqFallback.map(({item,grams})=>`${grams}g ${item}`).join('\n')}`;
+      const data=await callGroq([],fbPrompt);
+      const raw=(data.choices?.[0]?.message?.content||'').trim();
+      const fb=parseInt(raw.replace(/[^\d]/g,''));
+      if(!isNaN(fb))totalCal+=fb;
+    }catch(e){}
+  }
+
+  if(!totalCal)return null;
+  const perServing=Math.round(totalCal/servings);
+  const source=usdaHits===0?'ai':usdaHits>=parsed.length*0.6?'usda':'mixed';
+  return{calories:String(perServing),source};
+}
+
+// Auto-fill missing metadata fields — runs once when preview opens.
+// Fires two parallel tasks:
+//   1. Quick Groq call for course/cuisine/times
+//   2. USDA+Groq calorie pipeline (more accurate, takes longer)
+async function estimateMissingMeta(p){
+  const missingMeta=!p.course||!p.cuisine||!p.prepTime;
+  const missingCal=!p.calories;
+  if((!missingMeta&&!missingCal)||p._metaEstimated)return;
+  p._metaEstimated=true;
+
+  // ── Task 1: Quick fields (course, cuisine, times) ──────────────────────────
+  const metaTask=missingMeta?(async()=>{
+    try{
+      const ingrList=(p.ingredients||[]).flatMap(s=>s.items||[]).slice(0,20).join(', ');
+      const stepSnippet=(p.steps||[]).slice(0,3).map(s=>s.instructions).join(' ').substring(0,600);
+      const missingFields=[!p.course&&'course',!p.cuisine&&'cuisine',!p.prepTime&&'prepTime',!p.cookTime&&'cookTime',!p.totalTime&&'totalTime'].filter(Boolean);
+      const prompt=`Given this recipe, fill in ONLY the missing fields. Return ONLY JSON, no markdown:
+{"course":"Dinner","cuisine":"American","prepTime":"15 min","cookTime":"30 min","totalTime":"45 min"}
 Recipe name: ${p.name}
 Ingredients (sample): ${ingrList}
 Steps (sample): ${stepSnippet}
-
 Rules:
 - course: one of Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Appetizer, Side Dish, Soup, Salad
 - cuisine: e.g. American, Italian, Mexican, Asian, Mediterranean — infer from the recipe
-- prepTime/cookTime/totalTime: estimate from steps if not known, format as "X min" or "X hr Y min"
-- calories: estimate per serving as a number string only, e.g. "320"
-- notes: leave empty string "" — do not invent notes
-- Only provide fields that are currently empty: ${[!p.course&&'course',!p.cuisine&&'cuisine',!p.prepTime&&'prepTime',!p.cookTime&&'cookTime',!p.totalTime&&'totalTime',!p.calories&&'calories'].filter(Boolean).join(', ')}`;
-    const data=await callGroq([],prompt);
-    const raw=data.choices?.[0]?.message?.content||'';
-    const est=parseGroqJSON(raw);
-    if(!est)return;
-    if(!p.course&&est.course)p.course=est.course;
-    if(!p.cuisine&&est.cuisine)p.cuisine=est.cuisine;
-    if(!p.prepTime&&est.prepTime)p.prepTime=est.prepTime;
-    if(!p.cookTime&&est.cookTime)p.cookTime=est.cookTime;
-    if(!p.totalTime&&est.totalTime)p.totalTime=est.totalTime;
-    if(!p.calories&&est.calories)p.calories=String(est.calories).replace(/[^\d]/g,'');
-    // Re-render to show the filled values
-    if(state.view==='preview')renderPreview();
-  }catch(e){/* silently fail — user can fill manually */}
+- prepTime/cookTime/totalTime: estimate from steps, format as "X min" or "X hr Y min"
+- Only provide these fields: ${missingFields.join(', ')}`;
+      const data=await callGroq([],prompt);
+      const raw=data.choices?.[0]?.message?.content||'';
+      const est=parseGroqJSON(raw);
+      if(!est)return;
+      if(!p.course&&est.course)p.course=est.course;
+      if(!p.cuisine&&est.cuisine)p.cuisine=est.cuisine;
+      if(!p.prepTime&&est.prepTime)p.prepTime=est.prepTime;
+      if(!p.cookTime&&est.cookTime)p.cookTime=est.cookTime;
+      if(!p.totalTime&&est.totalTime)p.totalTime=est.totalTime;
+    }catch(e){}
+  })():Promise.resolve();
+
+  // ── Task 2: USDA + Groq calorie pipeline ──────────────────────────────────
+  const calTask=missingCal?(async()=>{
+    try{
+      const result=await calculateCalories(p);
+      if(result&&result.calories){
+        p.calories=result.calories;
+        p._caloriesEstimated=true;
+        p._caloriesSource=result.source; // 'usda' | 'mixed' | 'ai'
+      }
+    }catch(e){}
+  })():Promise.resolve();
+
+  // Run both in parallel; re-render once each finishes so fields appear progressively
+  metaTask.then(()=>{if(state.view==='preview')renderPreview();});
+  calTask.then(()=>{if(state.view==='preview')renderPreview();});
+  await Promise.allSettled([metaTask,calTask]);
 }
 
 // Recalculate calories/serving when user changes the serving count in the preview form.
@@ -3486,7 +3597,18 @@ function renderPreview(){
   const _totalCal=(_calNum&&_srvNum)?Math.round(_calNum*_srvNum):0;
   const servCalRow=`<div class="two-col">
     <div class="field"><label>Servings</label><input class="input" id="pv-servings" value="${escH(p.yield)}" placeholder="e.g. 4 servings" oninput="updatePreviewCal(this.value,${_totalCal})"/></div>
-    <div class="field"><label>Calories / Serving</label><input class="input" id="pv-calories" value="${escH(p.calories)}" placeholder="e.g. 320"/></div>
+    <div class="field"><label>Calories / Serving${p._caloriesEstimated?(()=>{
+      const src=p._caloriesSource||'ai';
+      const label=src==='usda'?'~ USDA data':src==='mixed'?'~ USDA + estimated':'~ AI estimate';
+      const color=src==='usda'?'#2A9D5C':src==='mixed'?'#B45309':'var(--terra)';
+      return` <span style="font-weight:500;text-transform:none;letter-spacing:0;color:${color};font-size:.7rem">${label}</span>`;
+    })():''}</label><input class="input" id="pv-calories" value="${escH(p.calories)}" placeholder="e.g. 320"/>${p._caloriesEstimated?(()=>{
+      const src=p._caloriesSource||'ai';
+      const msg=src==='usda'?'Calculated from USDA nutritional database. Edit if needed.'
+               :src==='mixed'?'Calculated using USDA data for most ingredients, AI estimate for the rest. Edit if needed.'
+               :'Not found in recipe — AI estimate only. Edit if you know the exact value.';
+      return`<div style="font-size:.72rem;color:var(--text-3);margin-top:4px;line-height:1.5">${msg}</div>`;
+    })():''}</div>
   </div>`;
 
   document.getElementById('app').innerHTML=`
