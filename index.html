@@ -1263,7 +1263,7 @@ function renderList(){
         <div class="topbar-row">
           <div class="topbar-brand">
             <div class="topbar-logo"><svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><text x="6" y="17" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="rgba(255,255,255,0.5)">R</text><text x="12" y="24" font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="17" fill="#ffffff">R</text></svg></div>
-            <span class="topbar-wordmark">Recipe Ripper</span><span style="font-size:.6rem;color:var(--text-3);font-weight:500;margin-left:4px">v31</span>
+            <span class="topbar-wordmark">Recipe Ripper</span><span style="font-size:.6rem;color:var(--text-3);font-weight:500;margin-left:4px">v32</span>
           </div>
           <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
         </div>
@@ -2810,6 +2810,85 @@ function parseMarkdownRecipe(md,url){
   };
 }
 
+// Extract ingredient sections from a parsed DOM document.
+// Handles WP Recipe Maker, Tasty Recipes, and generic heading+ul layouts.
+// Returns [{section, items}] — may have section:'' for unsectioned.
+function domIngrSections(doc){
+  // ── WP Recipe Maker ────────────────────────────────────────────────────────
+  const wprmGroups=doc.querySelectorAll('.wprm-recipe-ingredient-group');
+  if(wprmGroups.length){
+    const secs=[];
+    wprmGroups.forEach(grp=>{
+      const nameEl=grp.querySelector('.wprm-recipe-ingredient-group-name');
+      const section=(nameEl?(nameEl.textContent||'').replace(/\s+/g,' ').trim():'').replace(/:$/,'').trim();
+      const items=[...grp.querySelectorAll('.wprm-recipe-ingredient')].map(el=>{
+        const amt=(el.querySelector('.wprm-recipe-ingredient-amount')?.textContent||'').trim();
+        const unit=(el.querySelector('.wprm-recipe-ingredient-unit')?.textContent||'').trim();
+        const name=(el.querySelector('.wprm-recipe-ingredient-name')?.textContent||'').trim();
+        const notes=(el.querySelector('.wprm-recipe-ingredient-notes')?.textContent||'').trim();
+        return[amt,unit,name,notes].filter(Boolean).join(' ').replace(/\s{2,}/g,' ').trim();
+      }).filter(s=>s.length>2);
+      if(items.length)secs.push({section,items});
+    });
+    if(secs.length)return secs;
+  }
+  // ── Tasty Recipes ──────────────────────────────────────────────────────────
+  const tastyCard=doc.querySelector('.tasty-recipes-ingredients');
+  if(tastyCard){
+    const secs=[];let cur={section:'',items:[]};
+    tastyCard.querySelectorAll('h3,h4,li').forEach(el=>{
+      if(/^H[34]$/.test(el.tagName)){
+        if(cur.items.length)secs.push({...cur});
+        cur={section:(el.textContent||'').replace(/\s+/g,' ').trim().replace(/:$/,'').trim(),items:[]};
+      }else if(el.tagName==='LI'){
+        const t=(el.textContent||'').replace(/\s+/g,' ').trim();
+        if(t.length>2&&t.length<200)cur.items.push(t);
+      }
+    });
+    if(cur.items.length)secs.push({...cur});
+    if(secs.length)return secs;
+  }
+  // ── Generic heading + <ul> ─────────────────────────────────────────────────
+  const ingrWordRx=/\b(?:cup|tbsp|tsp|oz|lb|gram|g\b|kg|ml|litre|liter|pinch|clove|bunch|slice|piece|large|medium|small|fresh|dried|chopped|minced|diced|divided|optional|to taste|\d+)\b/i;
+  const ingrUls=[...doc.querySelectorAll('ul')].filter(ul=>{
+    const lis=[...ul.querySelectorAll('li')];
+    if(lis.length<2)return false;
+    const avg=lis.reduce((s,li)=>s+(li.textContent||'').trim().length,0)/lis.length;
+    if(avg>150||avg<3)return false;
+    return lis.filter(li=>ingrWordRx.test(li.textContent||'')).length>=1;
+  });
+  if(!ingrUls.length)return[];
+  const sections=[];
+  ingrUls.forEach(ul=>{
+    let header='';
+    let el=ul.previousElementSibling;
+    for(let d=0;d<5&&el&&!header;d++){
+      const tag=(el.tagName||'').toUpperCase();
+      if(/^H[1-6]$/.test(tag)||tag==='STRONG'||tag==='B'){header=(el.textContent||'').replace(/\s+/g,' ').trim();}
+      else{const inner=el.querySelector('h1,h2,h3,h4,h5,h6,strong');if(inner)header=(inner.textContent||'').trim();}
+      el=el.previousElementSibling;
+    }
+    if(!header&&ul.parentElement){
+      let par=ul.parentElement.previousElementSibling;
+      for(let d=0;d<3&&par&&!header;d++){
+        const tag=(par.tagName||'').toUpperCase();
+        if(/^H[1-6]$/.test(tag)){header=(par.textContent||'').trim();}
+        par=par.previousElementSibling;
+      }
+    }
+    if(header&&/^(?:nav|menu|social|share|follow|related|more recipes|subscribe|newsletter|recent|popular)/i.test(header))return;
+    const items=[...ul.querySelectorAll('li')]
+      .map(li=>(li.textContent||'').replace(/\s+/g,' ').trim())
+      .filter(t=>t.length>2&&t.length<200);
+    if(!items.length)return;
+    const sec=header||'';
+    const last=sections[sections.length-1];
+    if(last&&last.section===sec)last.items.push(...items);
+    else sections.push({section:sec,items});
+  });
+  return sections;
+}
+
 async function fetchFromURL(){
   const urlEl=document.getElementById('f-url');
   const url=(urlEl?.value||state.addForm.url||'').trim();
@@ -2865,8 +2944,9 @@ async function fetchFromURL(){
           // always embed JSON-LD; Jina executes JS so the structured data is present even
           // when the markdown snapshot didn't include the recipe card)
           let jinaHtmlNode=null;
+          let jinaHtmlRaw='';
           try{
-            const jinaHtmlRaw=await tryJinaHTML(url);
+            jinaHtmlRaw=await tryJinaHTML(url);
             // Try regex first (more reliable than DOMParser for script tag contents)
             const ldRx2=/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
             let ldM2;
@@ -2890,6 +2970,14 @@ async function fetchFromURL(){
           if(jinaHtmlNode){
             const p2=parseJSONLD(jinaHtmlNode);
             if(p2&&p2.steps&&p2.steps.length>=2){
+              // JSON-LD often flattens ingredient sections — try enriching from rendered DOM
+              if(jinaHtmlRaw&&(p2.ingredients.length<=1)){
+                try{
+                  const doc3=new DOMParser().parseFromString(jinaHtmlRaw,'text/html');
+                  const domSecs=domIngrSections(doc3);
+                  if(domSecs.length>1||(domSecs.length===1&&domSecs[0].section))p2.ingredients=domSecs;
+                }catch(e){}
+              }
               state.addForm.urlParsed=p2;
               state.addForm.urlStatus='success';state.addForm.urlError='';
               jumpToPreview('url');return;
@@ -3049,16 +3137,22 @@ async function fetchFromURL(){
         }
         parsed.steps=fallbackSteps;
       }
-      // Fallback if ingredients missing: try DOM <ul> extraction, then text parsing
-      if(!parsed.ingredients.length){
-        const domIngr=domExtractIngredients(doc);
-        if(domIngr.length){
-          parsed.ingredients=domIngr;
-        }else{
-          cleanDoc(doc);
-          const bodyText=docBodyText(doc);
-          const fb=parseRecipeText(bodyText);
-          if(fb.ingredients.length)parsed.ingredients=fb.ingredients;
+      // Fallback if ingredients missing OR flat (JSON-LD often strips sections):
+      // try DOM extraction which preserves heading-based section groups
+      if(!parsed.ingredients.length||parsed.ingredients.length===1){
+        const domSecs=domIngrSections(doc);
+        if(domSecs.length>1||(domSecs.length===1&&domSecs[0].section)){
+          parsed.ingredients=domSecs;
+        }else if(!parsed.ingredients.length){
+          const domIngr=domExtractIngredients(doc);
+          if(domIngr.length){
+            parsed.ingredients=domIngr;
+          }else{
+            cleanDoc(doc);
+            const bodyText=docBodyText(doc);
+            const fb=parseRecipeText(bodyText);
+            if(fb.ingredients.length)parsed.ingredients=fb.ingredients;
+          }
         }
       }
       state.addForm.urlStatus=parsed.steps.length?'success':'partial';
@@ -3316,6 +3410,19 @@ Rules:
   }catch(e){/* silently fail — user can fill manually */}
 }
 
+// Recalculate calories/serving when user changes the serving count in the preview form.
+// totalCal is the original total calories (calories × original servings) baked into the field.
+function updatePreviewCal(yieldVal,totalCal){
+  if(!totalCal)return;
+  const m=(yieldVal||'').match(/[\d.]+/);
+  if(!m)return;
+  const n=parseFloat(m[0]);
+  if(n>0){
+    const el=document.getElementById('pv-calories');
+    if(el)el.value=String(Math.round(totalCal/n));
+  }
+}
+
 function renderPreview(){
   const p=state.previewData;
   if(!p){go('add');return;}
@@ -3342,6 +3449,14 @@ function renderPreview(){
   const courseOpts=['','Breakfast','Brunch','Lunch','Dinner','Dessert','Snack','Appetizer','Side Dish','Soup','Salad','Main Course'];
   const mkField=(id,label,val,ph='')=>`<div class="field"><label>${label}</label><input class="input" id="${id}" value="${escH(val)}" placeholder="${ph||label}"/></div>`;
   const mkSelect=(id,label,val)=>`<div class="field"><label>${label}</label><select class="input" id="${id}">${courseOpts.map(o=>`<option value="${o}"${o===val?' selected':''}>${o||'Select…'}</option>`).join('')}</select></div>`;
+  // Compute total calories so calories/serving auto-updates when servings change
+  const _calNum=parseFloat(p.calories)||0;
+  const _srvNum=parseFloat((p.yield||'').match(/[\d.]+/)?.[0]||'0')||0;
+  const _totalCal=(_calNum&&_srvNum)?Math.round(_calNum*_srvNum):0;
+  const servCalRow=`<div class="two-col">
+    <div class="field"><label>Servings</label><input class="input" id="pv-servings" value="${escH(p.yield)}" placeholder="e.g. 4 servings" oninput="updatePreviewCal(this.value,${_totalCal})"/></div>
+    <div class="field"><label>Calories / Serving</label><input class="input" id="pv-calories" value="${escH(p.calories)}" placeholder="e.g. 320"/></div>
+  </div>`;
 
   document.getElementById('app').innerHTML=`
     <div class="shell">
@@ -3370,10 +3485,7 @@ function renderPreview(){
           ${mkSelect('pv-course','Course',p.course)}
           ${mkField('pv-cuisine','Cuisine',p.cuisine,'e.g. Italian')}
         </div>
-        <div class="two-col">
-          ${mkField('pv-servings','Servings',p.yield,'e.g. 4 servings')}
-          ${mkField('pv-calories','Calories / Serving',p.calories,'e.g. 320')}
-        </div>
+        ${servCalRow}
 
         ${allIngr.length?`
         <details class="accordion" style="margin-top:16px">
