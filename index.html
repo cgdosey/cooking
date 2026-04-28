@@ -2785,7 +2785,8 @@ Return ONLY this JSON (no markdown fences, no extra text):
 
 Rules:
 - ingredients: actual food items with measurements ONLY — no headings, no tips, no blog text
-- ingredients sections: use section:"" for unsectioned ingredients; use section name (e.g. "For the marinade") when the recipe groups them
+- ingredients sections: use section:"" for unsectioned ingredients; use the exact section name when the recipe groups them (e.g. "For the marinade", "Levain", "Sauce")
+- ingredients sections: capture EVERY section that exists — do not skip or merge any group. Recipes may have multiple sections like Levain, Starter, Poolish, Dough, Sauce, Marinade — include all of them
 - steps: each step must be a real cooking action — a complete instruction sentence or paragraph. Steps often start with a verb (Preheat, Mix, Add, Cook, Stir, Roast, etc.)
 - steps must NOT be: the recipe name, site taglines, author names, markdown links, email addresses, URLs, social text, or tips
 - steps format: some sites format steps as "Title – instruction text" — include the full text as the step
