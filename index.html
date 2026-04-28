@@ -2066,19 +2066,21 @@ async function scanExtractWithGroq(){
   if(!scanForm.images.length){showToast('Add at least one photo first');return;}
   scanForm={...scanForm,status:'loading'};renderAdd();
   try{
-    // Quick reachability check — fail fast if network blocks Groq
-    try{
-      const ping=await fetch('https://api.groq.com/openai/v1/models',{
-        headers:{'Authorization':`Bearer ${getGroqKey()}`},
-        signal:AbortSignal.timeout(8000)
-      });
-      if(!ping.ok&&ping.status===401)throw new Error('Invalid API key');
-      console.log('✓ Groq reachable, status:',ping.status);
-    }catch(e){
-      if(e.name==='TimeoutError'||e.name==='AbortError')
-        throw new Error('Cannot reach the Groq API from this network. Photo scanning may be blocked by a firewall or VPN. Try on a different network or use mobile.');
-      if(e.message.includes('API key'))throw e;
-      console.warn('Ping failed (non-fatal):',e.message);
+    // Quick reachability check — only when using a direct key (skip if proxy handles auth)
+    if(!GROQ_PROXY.trim()){
+      try{
+        const ping=await fetch('https://api.groq.com/openai/v1/models',{
+          headers:{'Authorization':`Bearer ${getGroqKey()}`},
+          signal:AbortSignal.timeout(8000)
+        });
+        if(!ping.ok&&ping.status===401)throw new Error('Invalid API key');
+        console.log('✓ Groq reachable, status:',ping.status);
+      }catch(e){
+        if(e.name==='TimeoutError'||e.name==='AbortError')
+          throw new Error('Cannot reach the Groq API from this network. Photo scanning may be blocked by a firewall or VPN. Try on a different network or use mobile.');
+        if(e.message.includes('API key'))throw e;
+        console.warn('Ping failed (non-fatal):',e.message);
+      }
     }
 
     // Compress all images — send together so AI sees the full recipe context
