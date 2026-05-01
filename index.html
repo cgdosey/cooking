@@ -38,6 +38,26 @@
     }catch(e){}
   })();
   </script>
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+  (function(){
+    try{
+      const canvas=document.querySelector('canvas')||document.createElement('canvas');
+      const iconHref=document.querySelector('link[rel="apple-touch-icon"]')?.href||'';
+      const manifest={
+        name:'Recipe Ripper',short_name:'Recipes',
+        start_url:'.',display:'standalone',
+        background_color:'#FFFFFF',theme_color:'#D4705A',
+        icons:iconHref?[{src:iconHref,sizes:'512x512',type:'image/png'}]:[]
+      };
+      const blob=new Blob([JSON.stringify(manifest)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('link');
+      link.rel='manifest';link.href=url;
+      document.head.appendChild(link);
+    }catch(e){}
+  })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <style>
@@ -252,6 +272,36 @@
     .full-ingr-sec{padding:10px 0 2px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);}
     .full-ingr-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:.9rem;}
     .full-ingr-row:last-child{border-bottom:none;}
+    /* ── SCALING BAR ── */
+    .scale-bar{display:flex;gap:6px;padding:12px 18px 4px;align-items:center;}
+    .scale-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);margin-right:6px;}
+    .scale-btn{padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:none;font-size:.8rem;font-weight:600;color:var(--text-2);cursor:pointer;transition:all .15s;}
+    .scale-btn.active{background:var(--terra);border-color:var(--terra);color:#fff;}
+    /* ── SUBSTITUTION ── */
+    .sub-btn{border:none;background:none;cursor:pointer;color:var(--text-3);font-size:.7rem;font-weight:600;padding:0 0 0 8px;flex-shrink:0;opacity:.6;transition:opacity .15s;}
+    .sub-btn:hover,.sub-btn:active{opacity:1;color:var(--terra);}
+    .sub-card{background:var(--terra-bg);border-radius:10px;padding:10px 13px;margin:4px 0 8px;font-size:.82rem;line-height:1.6;color:#7C3015;border-left:3px solid var(--terra);}
+    .sub-card-label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--terra);margin-bottom:3px;}
+    /* ── EXPORT MODAL ── */
+    .modal-overlay{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;}
+    .modal-sheet{background:#fff;border-radius:22px 22px 0 0;width:100%;max-height:80dvh;display:flex;flex-direction:column;padding-bottom:max(24px,env(safe-area-inset-bottom));}
+    .modal-handle{width:36px;height:4px;background:var(--border);border-radius:99px;margin:12px auto 0;}
+    .modal-title{font-size:1rem;font-weight:700;padding:14px 20px 10px;border-bottom:1px solid var(--border);}
+    .modal-body{overflow-y:auto;padding:16px 20px;flex:1;-webkit-overflow-scrolling:touch;}
+    .modal-actions{display:flex;gap:10px;padding:12px 20px 0;flex-shrink:0;}
+    .export-text{font-family:monospace;font-size:.78rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-2);border-radius:10px;padding:12px;color:var(--text-2);}
+    /* ── AI GENERATOR ── */
+    .ai-gen-wrap{padding:16px 18px;}
+    /* ── LAST COOKED BADGE ── */
+    .last-cooked-badge{font-size:.72rem;color:var(--text-3);margin-top:4px;}
+    /* ── PRINT ── */
+    @media print{
+      .shell>:not(.print-zone),.bnav,.topbar,.detail-cta,.sub-tabs,.scale-bar{display:none!important;}
+      .print-zone{display:block!important;}
+      body{background:#fff;font-family:Georgia,serif;}
+    }
+    .print-zone{display:none;}
+
     /* CTA row */
     .detail-cta{padding:12px 18px 16px;display:flex;flex-direction:column;gap:10px;}
     /* ── GUIDED ── */
@@ -298,6 +348,26 @@
     .t-sub{font-size:.65rem;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);margin-top:2px;}
     .t-label{font-size:.74rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);}
     .t-btns{display:flex;gap:10px;}
+    /* ingredients quick-view sheet */
+    .ingr-sheet-overlay{
+      position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.38);
+      opacity:0;pointer-events:none;transition:opacity .25s;
+    }
+    .ingr-sheet-overlay.open{opacity:1;pointer-events:all;}
+    .ingr-sheet{
+      position:fixed;left:0;right:0;bottom:0;z-index:401;
+      background:#fff;border-radius:22px 22px 0 0;
+      max-height:72dvh;display:flex;flex-direction:column;
+      transform:translateY(100%);transition:transform .28s cubic-bezier(.32,.72,0,1);
+      padding-bottom:max(20px,env(safe-area-inset-bottom));
+    }
+    .ingr-sheet.open{transform:translateY(0);}
+    .ingr-sheet-handle{width:36px;height:4px;background:var(--border);border-radius:99px;margin:12px auto 0;}
+    .ingr-sheet-title{font-size:.92rem;font-weight:700;padding:14px 20px 6px;border-bottom:1px solid var(--border);}
+    .ingr-sheet-body{overflow-y:auto;padding:4px 20px 12px;-webkit-overflow-scrolling:touch;}
+    .ingr-sheet-sec{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);padding:12px 0 4px;}
+    .ingr-sheet-row{display:flex;padding:9px 0;border-bottom:1px solid var(--border);font-size:.9rem;color:var(--text-2);}
+    .ingr-sheet-row:last-child{border-bottom:none;}
     /* round floating nav */
     .guided-footer{
       position:fixed;bottom:0;left:0;right:0;
@@ -306,7 +376,7 @@
       display:flex;align-items:center;justify-content:flex-end;gap:10px;
       pointer-events:none;
     }
-    .guided-footer-left{margin-right:auto;}
+    .guided-footer-left{margin-right:auto;display:flex;gap:8px;}
     .rbtn{
       width:54px;height:54px;border-radius:50%;border:none;cursor:pointer;
       display:flex;align-items:center;justify-content:center;
@@ -747,6 +817,212 @@ let shoppingList=load('k_shoplist',[]);
 let nextId=Math.max(...recipes.map(r=>r.id),1)+1;
 function saveRecipes(){save('k_recipes',recipes);}
 function saveShopList(){save('k_shoplist',shoppingList);}
+
+// ═══════════════════════════════════════
+//  SCALING
+// ═══════════════════════════════════════
+const UNICODE_FRACS={'¼':0.25,'½':0.5,'¾':0.75,'⅓':1/3,'⅔':2/3,'⅛':0.125,'⅜':0.375,'⅝':0.625,'⅞':0.875};
+function parseQty(s){
+  s=s.trim();
+  if(UNICODE_FRACS[s]!==undefined)return UNICODE_FRACS[s];
+  if(/^\d+$/.test(s))return parseInt(s);
+  if(/^\d+\.\d+$/.test(s))return parseFloat(s);
+  if(/^\d+\/\d+$/.test(s)){const[a,b]=s.split('/');return parseInt(a)/parseInt(b);}
+  if(/^\d+\s+\d+\/\d+$/.test(s)){const[w,f]=s.split(' ');const[a,b]=f.split('/');return parseInt(w)+parseInt(a)/parseInt(b);}
+  return null;
+}
+function fmtQty(n){
+  if(n===0)return'0';
+  // Try common fractions
+  const fracs=[[1/8,'⅛'],[1/4,'¼'],[1/3,'⅓'],[3/8,'⅜'],[1/2,'½'],[5/8,'⅝'],[2/3,'⅔'],[3/4,'¾'],[7/8,'⅞']];
+  const whole=Math.floor(n);
+  const frac=n-whole;
+  let fracStr='';
+  if(frac>0.01){
+    const best=fracs.reduce((a,b)=>Math.abs(b[0]-frac)<Math.abs(a[0]-frac)?b:a);
+    if(Math.abs(best[0]-frac)<0.07)fracStr=best[1];
+    else fracStr=frac.toFixed(2).replace(/\.?0+$/,'').replace('0.','.');
+  }
+  if(whole===0)return fracStr||n.toFixed(2).replace(/\.?0+$/,'');
+  return fracStr?`${whole}${fracStr}`:`${whole}`;
+}
+function scaleIngredient(text,factor){
+  if(factor===1||!text)return text;
+  // Match: optional leading number (whole or fraction or unicode) immediately followed by optional unit letter
+  // e.g. "35g", "1/2 cup", "1 1/2 cups", "¾ tsp", "2.5 tbsp"
+  const qtyRx=/^([\d¼½¾⅓⅔⅛⅜⅝⅞]+(?:[\s\/][\d]+)*(?:\.\d+)?)\s*/;
+  const m=text.match(qtyRx);
+  if(!m)return text;
+  const rawQty=m[1].trim();
+  const qty=parseQty(rawQty);
+  if(qty===null||qty===0)return text;
+  const scaled=qty*factor;
+  const rest=text.slice(m[0].length);
+  // If the next char is a letter right after digits (compact metric like "35g"), keep it attached
+  const compactM=rest.match(/^([a-zA-Z]+)(.*)/);
+  if(compactM&&/^(g|kg|ml|l|oz|lb|mg)$/i.test(compactM[1])){
+    return fmtQty(scaled)+compactM[1]+' '+compactM[2].trim();
+  }
+  return fmtQty(scaled)+' '+rest;
+}
+function setScale(f){state.scale=f;render();}
+function scaleBarHTML(){
+  const opts=[{v:0.5,l:'½×'},{v:1,l:'1×'},{v:2,l:'2×'},{v:3,l:'3×'}];
+  return`<div class="scale-bar">
+    <span class="scale-label">Scale</span>
+    ${opts.map(o=>`<button class="scale-btn${state.scale===o.v?' active':''}" onclick="setScale(${o.v})">${o.l}</button>`).join('')}
+  </div>`;
+}
+function scaledIngrHTML(r,cls='ingr-row',nameCls='ingr-name'){
+  return(r.ingredients||[]).map(sec=>`
+    ${sec.section&&(r.ingredients||[]).length>1?`<div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);padding:10px 0 4px">${escH(sec.section)}</div>`:''}
+    ${(sec.items||[]).map((item,idx)=>{
+      const scaled=scaleIngredient(item,state.scale);
+      const safeItem=escH(item);
+      const safeScaled=escH(scaled);
+      return`<div class="${cls}" id="ingr-${escH(sec.section||'')}-${idx}">
+        <span class="${nameCls}">${safeScaled}</span>
+        <button class="sub-btn" onclick="showSub(event,'${safeItem.replace(/'/g,"\\'")}')" title="Find substitute">sub?</button>
+      </div>
+      <div id="sub-${escH(sec.section||'')}-${idx}" style="display:none"></div>`;
+    }).join('')}
+  `).join('');
+}
+// ═══════════════════════════════════════
+//  COOK HISTORY
+// ═══════════════════════════════════════
+function formatLastCooked(iso){
+  if(!iso)return null;
+  const d=new Date(iso),now=new Date();
+  const days=Math.floor((now-d)/(1000*60*60*24));
+  if(days===0)return'Today';
+  if(days===1)return'Yesterday';
+  if(days<7)return`${days} days ago`;
+  if(days<30)return`${Math.floor(days/7)} week${Math.floor(days/7)!==1?'s':''} ago`;
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+}
+// ═══════════════════════════════════════
+//  SUBSTITUTION
+// ═══════════════════════════════════════
+async function showSub(e,ingredient){
+  e.stopPropagation();
+  // Find the sibling div by walking up to the ingr row
+  const btn=e.currentTarget;
+  const row=btn.parentElement;
+  const subDiv=row.nextElementSibling;
+  if(!subDiv)return;
+  // Toggle off if already shown
+  if(subDiv.style.display==='block'){subDiv.style.display='none';subDiv.innerHTML='';return;}
+  subDiv.style.display='block';
+  subDiv.innerHTML=`<div class="sub-card"><div class="sub-card-label">Finding substitutes…</div><div style="font-size:.8rem;color:var(--text-3)">Asking AI…</div></div>`;
+  try{
+    const prompt=`You're a cooking assistant. Give 2-3 practical substitutes for: "${ingredient}"
+Format as a short bulleted list. Each bullet: substitute → brief note on taste/texture difference.
+Be concise — 1 line per substitute max.`;
+    const data=await callGroq([],prompt);
+    const raw=(data.choices?.[0]?.message?.content||'').trim();
+    subDiv.innerHTML=`<div class="sub-card"><div class="sub-card-label">Substitutes for ${escH(ingredient.replace(/^\d[\d\s\/¼½¾⅓⅔⅛.]*\s*(?:g|kg|ml|l|oz|lb|cup|tbsp|tsp|cups|cloves?|bunch|can)?\s*/i,''))}</div><div style="white-space:pre-wrap">${escH(raw)}</div></div>`;
+  }catch(err){
+    subDiv.innerHTML=`<div class="sub-card"><div class="sub-card-label">Error</div>Could not fetch substitutes. Check your connection.</div>`;
+  }
+}
+// ═══════════════════════════════════════
+//  EXPORT / SHARE
+// ═══════════════════════════════════════
+function buildExportText(r,factor){
+  factor=factor||1;
+  let out=r.name+'\n'+'='.repeat(r.name.length)+'\n\n';
+  if(r.yield)out+=`Yield: ${r.yield}\n`;
+  if(r.prepTime)out+=`Prep: ${r.prepTime}\n`;
+  if(r.cookTime)out+=`Cook: ${r.cookTime}\n`;
+  if(r.totalTime)out+=`Total: ${r.totalTime}\n`;
+  if(r.calories)out+=`Calories: ~${r.calories} per serving\n`;
+  out+='\nINGREDIENTS\n-----------\n';
+  (r.ingredients||[]).forEach(sec=>{
+    if(sec.section&&r.ingredients.length>1)out+=`\n${sec.section}:\n`;
+    (sec.items||[]).forEach(item=>out+=`• ${scaleIngredient(item,factor)}\n`);
+  });
+  out+='\nSTEPS\n-----\n';
+  (r.steps||[]).forEach((s,i)=>out+=`${i+1}. ${s.instructions}\n\n`);
+  if(r.notes)out+=`\nNOTES\n-----\n${r.notes}\n`;
+  return out;
+}
+function showExport(id){
+  const r=recipes.find(x=>x.id===id);if(!r)return;
+  const text=buildExportText(r,state.scale);
+  const existing=document.getElementById('export-modal');
+  if(existing)existing.remove();
+  const modal=document.createElement('div');
+  modal.id='export-modal';
+  modal.className='modal-overlay';
+  modal.innerHTML=`
+    <div class="modal-sheet" onclick="event.stopPropagation()">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Export "${escH(r.name)}"${state.scale!==1?` · ${state.scale}×`:''}</div>
+      <div class="modal-body">
+        <div class="export-text" id="export-text-content">${escH(text)}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-terra" style="flex:1" onclick="copyExport()">Copy text</button>
+        <button class="btn btn-outline" style="flex:1" onclick="window.print()">Print</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('export-modal').remove()">Close</button>
+      </div>
+    </div>`;
+  modal.addEventListener('click',()=>modal.remove());
+  document.body.appendChild(modal);
+}
+function copyExport(){
+  const el=document.getElementById('export-text-content');
+  if(!el)return;
+  navigator.clipboard.writeText(el.textContent).then(()=>showToast('Copied to clipboard!')).catch(()=>{
+    // fallback
+    const ta=document.createElement('textarea');
+    ta.value=el.textContent;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
+    showToast('Copied!');
+  });
+}
+// ═══════════════════════════════════════
+//  AI RECIPE GENERATOR
+// ═══════════════════════════════════════
+let aiGenState={status:'idle',prompt:'',result:null,error:''};
+async function runAIGen(){
+  const textarea=document.getElementById('ai-gen-prompt');
+  const promptText=(textarea?.value||aiGenState.prompt||'').trim();
+  if(!promptText){showToast('Describe what you want to make first');return;}
+  aiGenState={status:'loading',prompt:promptText,result:null,error:''};
+  renderAdd();
+  try{
+    const sysPrompt=`You are a professional recipe writer. Generate a complete, detailed recipe based on the user's description.
+Return ONLY this JSON (no markdown fences, no extra text):
+{"name":"ACTUAL_RECIPE_NAME","prepTime":"ACTUAL_PREP_TIME","cookTime":"ACTUAL_COOK_TIME","totalTime":"ACTUAL_TOTAL_TIME","course":"ACTUAL_COURSE","cuisine":"ACTUAL_CUISINE","servings":"ACTUAL_SERVINGS","calories":"ACTUAL_CALORIES_OR_EMPTY","description":"ACTUAL_DESCRIPTION","notes":"ACTUAL_NOTES_OR_EMPTY","ingredients":[{"section":"","items":["ACTUAL_INGREDIENT_1 with amount","ACTUAL_INGREDIENT_2"]}],"steps":["ACTUAL_STEP_1_full_instruction","ACTUAL_STEP_2"]}
+Rules:
+- Include precise measurements for all ingredients (grams preferred for baking, cups/tbsp for cooking)
+- Steps should be detailed and complete — full cooking instructions
+- If the recipe naturally has sections (e.g. sauce + pasta, or levain + dough), use multiple ingredient sections
+- servings: e.g. "4 servings"
+- course: one of Breakfast,Brunch,Lunch,Dinner,Dessert,Snack,Appetizer,Side Dish,Soup,Salad`;
+    const data=await callGroq([],`${sysPrompt}\n\nUser request: ${promptText}`);
+    const raw=data.choices?.[0]?.message?.content||'';
+    const result=parseGroqJSON(raw);
+    if(!result||!result.name||!result.steps?.length){throw new Error('Could not generate a valid recipe. Try being more specific.');}
+    aiGenState={status:'done',prompt:promptText,result,error:''};
+  }catch(e){
+    aiGenState={status:'error',prompt:promptText,result:null,error:e.message||'Generation failed'};
+  }
+  renderAdd();
+}
+function saveAIGen(){
+  const r=aiGenState.result;if(!r)return;
+  const ingrs=Array.isArray(r.ingredients)?r.ingredients:[];
+  const steps=(r.steps||[]).map(s=>{const tm=detectTimer(s);return{phase:'',title:summarizeStepTitle(s),instructions:s,image:'',timerMinutes:tm,timerLabel:tm?`${tm} min`:''};});
+  const id=nextId++;
+  recipes.push({id,name:r.name,description:r.description||'',image:'',yield:r.servings||r.yield||'',difficulty:'Intermediate',cookware:[],ingredients:ingrs,steps,prepTime:r.prepTime||'',cookTime:r.cookTime||'',totalTime:r.totalTime||'',course:r.course||'',cuisine:r.cuisine||'',calories:r.calories||'',notes:r.notes||''});
+  saveRecipes();
+  aiGenState={status:'idle',prompt:'',result:null,error:''};
+  showToast(`"${r.name}" saved!`);
+  go('detail',{id});
+}
+
 // ═══════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════
@@ -1133,7 +1409,8 @@ function goPrev(){
 }
 function setDTab(t){state.detailTab=t;render();}
 function setShopTab(t){state.shopTab=t;render();}
-function setAddTab(t){state.addTab=t;render();}
+function setAddTab(t){state.addTab=t;if(t!=='ai'){}render();}
+function setAIPrompt(v){aiGenState.prompt=v;}
 // ═══════════════════════════════════════
 //  SWIPE (guided mode)
 // ═══════════════════════════════════════
@@ -1273,6 +1550,9 @@ function renderDetail(){
   </div>`;
   let tabContent='';
   if(state.detailTab==='ingredients'){
+    const rows=scaledIngrHTML(r,'ingr-row','ingr-name');
+    tabContent=`<div>${scaleBarHTML()}<div class="tab-content">${rows||'<div style="padding:16px 0;color:var(--text-3);font-size:.9rem">No ingredients listed.</div>'}</div></div>`;
+  }else if(state.detailTab==='__SKIP__'){
     const rows=(r.ingredients||[]).map(sec=>
       `${sec.section&&(r.ingredients||[]).length>1?`<div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);padding:10px 0 4px">${escH(sec.section)}</div>`:''}
       ${(sec.items||[]).map(item=>`<div class="ingr-row"><span class="ingr-name">${escH(item)}</span></div>`).join('')}`
@@ -1317,6 +1597,7 @@ function renderDetail(){
         <div style="display:flex;align-items:center;padding:max(14px,env(safe-area-inset-top)) 12px 10px;gap:4px">
           <button class="ibtn" onclick="go('list')">${I.back}</button>
           <div style="flex:1"></div>
+          <button class="ibtn" onclick="showExport(${r.id})" title="Export recipe" style="margin-right:2px">⬆</button>
           <button class="ibtn" style="color:var(--danger)" onclick="deleteRecipe(${r.id})" title="Delete recipe">${I.trash}</button>
         </div>
       </div>
@@ -1333,6 +1614,7 @@ function renderDetail(){
           ${r.calories?`<span class="meta-chip">${escH(r.calories)} cal</span>`:''}
         </div>`:''}
       </div>
+      ${r.lastCooked?`<div class="last-cooked-badge" style="padding:0 18px 8px">🍳 Last cooked ${formatLastCooked(r.lastCooked)}${r.cookCount>1?` · ${r.cookCount} times`:''}</div>`:''}
       <div class="sub-tabs">
         <button class="sub-tab ${state.detailTab==='ingredients'?'active':''}" onclick="setDTab('ingredients')">Ingredients</button>
         <button class="sub-tab ${state.detailTab==='cookware'?'active':''}" onclick="setDTab('cookware')">Cookware</button>
@@ -1392,6 +1674,16 @@ function renderGuided(){
       <button onclick="applyCustomTimer()" style="font-size:.8rem;padding:5px 12px;border-radius:8px;background:var(--terra);color:#fff;border:none;cursor:pointer;font-weight:600">Add Timer</button>
     </div>`;
   const stepImg='';
+  // Build ingredients sheet content
+  const ingrSecs=r.ingredients||[];
+  const multiIngrSec=ingrSecs.length>1&&ingrSecs.some(s=>s.section);
+  const ingrSheetRows=''; // generated dynamically via renderScaledSheetRows
+  const _ingrRowsStatic=ingrSecs.map(sec=>`
+    ${multiIngrSec&&sec.section?`<div class="ingr-sheet-sec">${escH(sec.section)}</div>`:''}
+    ${(sec.items||[]).map(it=>`<div class="ingr-sheet-row">${escH(it)}</div>`).join('')}
+  `).join('');
+  const totalIngrCount=ingrSecs.reduce((s,sec)=>s+(sec.items?.length||0),0);
+
   document.getElementById('app').innerHTML=`
     <div class="guided-shell">
       <div class="guided-top">
@@ -1408,13 +1700,37 @@ function renderGuided(){
       </div>
       <div class="guided-footer">
         <div class="guided-footer-left">
-          <button class="rbtn rbtn-white" onclick="go('detail',{id:${r.id}})" title="Back to recipe">${I.book}</button>
+          <button class="rbtn rbtn-white" onclick="go('detail',{id:${r.id}})" title="Recipe overview">${I.book}</button>
+          ${totalIngrCount?`<button class="rbtn rbtn-white" onclick="openIngrSheet()" title="View ingredients" style="font-size:.6rem;font-weight:700;letter-spacing:.3px">INGR</button>`:''}
         </div>
         <button class="rbtn rbtn-white" onclick="goPrev()" ${idx===0?'disabled':''}>${I.back}</button>
         <button class="rbtn rbtn-terra" onclick="goNext()">${idx===total-1?I.check:I.fwd}</button>
       </div>
+      ${totalIngrCount?`
+      <div class="ingr-sheet-overlay" id="ingr-overlay" onclick="closeIngrSheet()"></div>
+      <div class="ingr-sheet" id="ingr-sheet">
+        <div class="ingr-sheet-handle"></div>
+        <div class="ingr-sheet-title">Ingredients · ${totalIngrCount} item${totalIngrCount!==1?'s':''}</div>
+        <div class="ingr-sheet-body" id="ingr-sheet-body">${renderScaledSheetRows(${r.id})}</div>
+      </div>`:''}
     </div>`;
   attachSwipe();bindTimerBtns();
+  window.renderScaledSheetRows=function(rid){
+    const rr=recipes.find(x=>x.id===rid);if(!rr)return'';
+    const ms=rr.ingredients.length>1&&rr.ingredients.some(s=>s.section);
+    return rr.ingredients.map(sec=>
+      (ms&&sec.section?'<div class="ingr-sheet-sec">'+escH(sec.section)+'</div>':'')+
+      (sec.items||[]).map(it=>'<div class="ingr-sheet-row">'+escH(scaleIngredient(it,state.scale))+'</div>').join('')
+    ).join('');
+  };
+  window.openIngrSheet=function(){
+    document.getElementById('ingr-overlay')?.classList.add('open');
+    document.getElementById('ingr-sheet')?.classList.add('open');
+  };
+  window.closeIngrSheet=function(){
+    document.getElementById('ingr-overlay')?.classList.remove('open');
+    document.getElementById('ingr-sheet')?.classList.remove('open');
+  };
 }
 // ═══════════════════════════════════════
 //  COMPLETE
@@ -1482,21 +1798,44 @@ function renderFull(){
       ingrHTML+=`<div class="full-ingr-row">${escH(item)}</div>`;
     });
   });
+  const ho2=hoText(r);
+  const imgEl2=r.image
+    ?`<img class="detail-img" src="${escH(r.image)}" alt="" onerror="this.outerHTML='<div class=detail-img-ph>${escH(r.name.charAt(0))}</div>'">`
+    :`<div class="detail-img-ph">${escH(r.name.charAt(0))}</div>`;
   document.getElementById('app').innerHTML=`
     <div class="shell">
       <div style="position:sticky;top:0;z-index:200;background:rgba(255,255,255,.93);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);">
         <div style="display:flex;align-items:center;padding:max(14px,env(safe-area-inset-top)) 12px 10px;gap:4px">
           <button class="ibtn" onclick="${backFn}">${I.back}</button>
-          <div style="font-size:1rem;font-weight:700;margin-left:4px">${escH(r.name)}</div>
         </div>
       </div>
-      <div style="padding:0 18px 32px">
-        ${ingrHTML?`<div style="font-size:1rem;font-weight:800;padding:18px 0 8px">Ingredients</div>${ingrHTML}`:''}
-        <div style="font-size:1rem;font-weight:800;padding:22px 0 4px">Steps</div>
-        ${stepsHTML}
+      ${imgEl2}
+      <div class="detail-hdr">
+        <div class="detail-name">${escH(r.name)}</div>
+        <div class="detail-meta">${I.clock} ${ho2?ho2+' hands-off':r.totalTime||''}${r.yield?` &nbsp;·&nbsp; ${escH(r.yield)}`:''}</div>
+        ${(r.prepTime||r.cookTime||r.course||r.cuisine||r.calories)?`
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+          ${r.prepTime?`<span class="meta-chip">Prep ${escH(r.prepTime)}</span>`:''}
+          ${r.cookTime?`<span class="meta-chip">Cook ${escH(r.cookTime)}</span>`:''}
+          ${r.course?`<span class="meta-chip">${escH(r.course)}</span>`:''}
+          ${r.cuisine?`<span class="meta-chip">${escH(r.cuisine)}</span>`:''}
+          ${r.calories?`<span class="meta-chip">${escH(r.calories)} cal</span>`:''}
+        </div>`:''}
       </div>
       <div style="padding:0 18px 32px">
-        <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${rid}})">Start cooking</button>
+        ${ingrHTML?`
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);padding:18px 0 6px">Ingredients</div>
+          ${ingrHTML}
+        `:''}
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);padding:22px 0 6px">Steps</div>
+        ${stepsHTML}
+        ${r.notes?`
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);padding:20px 0 8px">Chef's Notes</div>
+          <div style="background:var(--terra-bg);border-radius:14px;padding:14px 16px;font-size:.9rem;line-height:1.85;color:var(--text-1);white-space:pre-wrap;border-left:3px solid var(--terra)">${escH(r.notes)}</div>
+        `:''}
+      </div>
+      <div class="detail-cta">
+        <button class="btn btn-terra btn-full btn-lg" onclick="go('guided',{id:${rid}})">Resume cooking</button>
       </div>
     </div>${bnavHTML()}`;
 }
@@ -1651,6 +1990,36 @@ function renderAdd(){
         <button class="btn btn-terra btn-full btn-lg" onclick="previewURLRecipe()">Preview &amp; Save</button>
       </div>`;
   }
+  const ag=aiGenState;
+  let aiTabContent='';
+  if(ag.status==='idle'||ag.status==='error'){
+    aiTabContent=`<div class="ai-gen-wrap">
+      <div style="font-size:.9rem;line-height:1.6;color:var(--text-2);margin-bottom:12px">Describe what you want to make — ingredients you have, cuisine, dietary needs, or just a vibe.</div>
+      <textarea class="input ta" id="ai-gen-prompt" rows="5" placeholder="e.g. A quick weeknight pasta with chicken, lemon, garlic, and spinach. Healthy but satisfying." oninput="aiGenState.prompt=this.value" style="margin-bottom:12px">${escH(ag.prompt)}</textarea>
+      ${ag.error?`<div style="color:var(--danger);font-size:.82rem;padding:0 0 10px">${escH(ag.error)}</div>`:''}
+      <button class="btn btn-terra btn-full" onclick="runAIGen()">✦ Generate Recipe</button>
+    </div>`;
+  }else if(ag.status==='loading'){
+    aiTabContent=`<div class="ai-gen-wrap" style="text-align:center;padding:40px 18px">
+      <div style="font-size:2rem;margin-bottom:12px">✦</div>
+      <div style="font-weight:700;margin-bottom:6px">Writing your recipe…</div>
+      <div style="font-size:.84rem;color:var(--text-3)">"${escH(ag.prompt)}"</div>
+    </div>`;
+  }else if(ag.status==='done'&&ag.result){
+    const res=ag.result;
+    const previewIngr=(res.ingredients||[]).flatMap(s=>s.items||[]).slice(0,4).join(', ');
+    aiTabContent=`<div class="ai-gen-wrap">
+      <div style="background:var(--terra-bg);border-radius:14px;padding:16px;margin-bottom:14px;border-left:3px solid var(--terra)">
+        <div style="font-size:1.1rem;font-weight:800;margin-bottom:4px">${escH(res.name)}</div>
+        ${res.servings?`<div style="font-size:.82rem;color:var(--text-3);margin-bottom:8px">${escH(res.servings)}${res.prepTime?' · '+escH(res.prepTime)+' prep':''}${res.cookTime?' · '+escH(res.cookTime)+' cook':''}</div>`:''}
+        <div style="font-size:.84rem;color:var(--text-2);margin-bottom:4px">${escH(previewIngr)}${(res.ingredients||[]).flatMap(s=>s.items||[]).length>4?' …':''}</div>
+        <div style="font-size:.78rem;color:var(--text-3)">${(res.steps||[]).length} steps</div>
+      </div>
+      <button class="btn btn-terra btn-full btn-lg" onclick="saveAIGen()" style="margin-bottom:10px">Save This Recipe</button>
+      <button class="btn btn-outline btn-full" onclick="aiGenState.status='idle';renderAdd()">Try a different description</button>
+    </div>`;
+  }
+  const aiTab=aiTabContent;
   const urlTab=`
     <div class="field">
       <label>Recipe URL</label>
@@ -1737,13 +2106,14 @@ function renderAdd(){
         <div style="width:40px"></div>
       </div></div>
       <div class="add-page">
-        <div class="add-tabs" style="margin-top:4px">
+        <div class="add-tabs" style="margin-top:4px;flex-wrap:wrap">
+          <button class="add-tab ${state.addTab==='ai'?'active':''}" onclick="setAddTab('ai')" style="${state.addTab==='ai'?'':' color:var(--terra);font-weight:700'}">✦ Generate</button>
           <button class="add-tab ${state.addTab==='url'?'active':''}" onclick="setAddTab('url')">Import URL</button>
           <button class="add-tab ${state.addTab==='scan'?'active':''}" onclick="setAddTab('scan')">Photo/Upload</button>
           <button class="add-tab ${state.addTab==='paste'?'active':''}" onclick="setAddTab('paste')">Paste Text</button>
           <button class="add-tab ${state.addTab==='structured'?'active':''}" onclick="setAddTab('structured')">Free Form</button>
         </div>
-        ${state.addTab==='url'?urlTab:state.addTab==='paste'?pasteTab:state.addTab==='scan'?renderScanTab():structTab}
+        ${state.addTab==='ai'?aiTab:state.addTab==='url'?urlTab:state.addTab==='paste'?pasteTab:state.addTab==='scan'?renderScanTab():structTab}
       </div>
     </div>${bnavHTML()}`;
 }
