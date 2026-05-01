@@ -37,6 +37,40 @@
       document.head.appendChild(fav);
     }catch(e){}
   })();
+  // ── Service Worker registration ──────────────────────────────────────────
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('./sw.js').then(reg=>{
+      // Poll for updates whenever the app becomes visible (e.g. user returns from background)
+      document.addEventListener('visibilitychange',()=>{
+        if(document.visibilityState==='visible')reg.update();
+      });
+      // New SW found — wait for it to finish installing, then show banner
+      reg.addEventListener('updatefound',()=>{
+        const sw=reg.installing;
+        sw&&sw.addEventListener('statechange',()=>{
+          if(sw.state==='installed'&&navigator.serviceWorker.controller){
+            showAppUpdateBanner();
+          }
+        });
+      });
+    }).catch(()=>{});
+    // Fired when the new SW takes control mid-session
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      showAppUpdateBanner();
+    });
+    // Message from SW (activate fires SW_UPDATED to all clients)
+    navigator.serviceWorker.addEventListener('message',e=>{
+      if(e.data&&e.data.type==='SW_UPDATED')showAppUpdateBanner();
+    });
+  }
+  function showAppUpdateBanner(){
+    if(document.getElementById('rr-update-banner'))return;
+    const b=document.createElement('div');
+    b.id='rr-update-banner';
+    b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#D4705A;color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;font-family:-apple-system,system-ui,sans-serif;font-size:.85rem;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    b.innerHTML='<span>✦ New version available</span><button onclick="location.reload()" style="background:#fff;color:#D4705A;border:none;border-radius:8px;padding:5px 14px;font-size:.82rem;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">Update</button>';
+    document.body.prepend(b);
+  }
   </script>
   <meta name="mobile-web-app-capable" content="yes">
   <script>
