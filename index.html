@@ -3846,9 +3846,35 @@ Rules:
       }
     }catch(e){}
   })():Promise.resolve();
-  // Run both in parallel; re-render once each finishes so fields appear progressively
-  metaTask.then(()=>{if(state.view==='preview')renderPreview();});
-  calTask.then(()=>{if(state.view==='preview')renderPreview();});
+  // Patch only the changed form fields — never replace the whole DOM
+  // (a full re-render can swallow a tap that fires while the DOM is being rebuilt)
+  metaTask.then(()=>{
+    if(state.view!=='preview')return;
+    const setInput=(id,val)=>{const el=document.getElementById(id);if(el&&!el.value&&val)el.value=val;};
+    setInput('pv-prep',p.prepTime);
+    setInput('pv-cook',p.cookTime);
+    setInput('pv-total',p.totalTime);
+    setInput('pv-cuisine',p.cuisine);
+    if(p.course){const sel=document.getElementById('pv-course');if(sel&&!sel.value)sel.value=p.course;}
+  });
+  calTask.then(()=>{
+    if(state.view!=='preview')return;
+    const el=document.getElementById('pv-calories');
+    if(el&&!el.value&&p.calories){
+      el.value=p.calories;
+      // Add a small source badge below the input without touching the rest of the DOM
+      if(!document.getElementById('pv-cal-note')){
+        const src=p._caloriesSource||'ai';
+        const note=document.createElement('div');
+        note.id='pv-cal-note';
+        note.style.cssText='font-size:.72rem;color:var(--text-3);margin-top:4px;line-height:1.5';
+        note.textContent=src==='usda'?'Calculated from USDA nutritional database. Edit if needed.'
+          :src==='mixed'?'USDA data for most ingredients, AI estimate for the rest. Edit if needed.'
+          :'AI estimate only. Edit if you know the exact value.';
+        el.parentNode.appendChild(note);
+      }
+    }
+  });
   await Promise.allSettled([metaTask,calTask]);
 }
 // Recalculate calories/serving when user changes the serving count in the preview form.
