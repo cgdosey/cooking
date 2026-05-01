@@ -3565,6 +3565,7 @@ function deleteRecipe(id){
 // ═══════════════════════════════════════
 // Jump directly to the combined Review & Save screen after URL or paste import
 function jumpToPreview(source){
+  state._resumePreview=false;
   const p=state.addForm.urlParsed;
   if(!p){renderAdd();return;}
   state.previewData={
@@ -3655,9 +3656,16 @@ function previewScanRecipe(){
   state.view='preview';render();
 }
 function closePreview(){
+  state._resumePreview=false;
   state.view='add';render();
 }
 function saveFromPreview(andCook){
+  state._resumePreview=false;
+  // Defensive: if previewData was lost, try to recover from urlParsed
+  if(!state.previewData&&state.addForm.urlParsed){
+    const u=state.addForm.urlParsed;
+    state.previewData={source:'url',name:u.name||'',image:u.image||'',description:u.description||'',yield:u.yield||'',difficulty:u.difficulty||'Intermediate',cookware:u.cookware||[],ingredients:u.ingredients||[],steps:(u.steps||[]).map(s=>({...s})),prepTime:u.prepTime||'',cookTime:u.cookTime||'',totalTime:u.totalTime||'',course:u.course||'',cuisine:u.cuisine||'',calories:u.calories||'',notes:u.notes||''};
+  }
   const p=state.previewData;
   if(!p){showToast('No recipe to save');return;}
   const name=(document.getElementById('preview-name')?.value||'').trim()||p.name||'';
