@@ -1,5 +1,5 @@
 // Recipe Ripper — Service Worker
-// BUILD: 2025-05-01
+// BUILD: 2026-05-01c
 // ─────────────────────────────────────────────────────────────────────────────
 // HOW UPDATES WORK
 //   When you deploy a new version of recipe-ripper.html, also update the
@@ -9,7 +9,7 @@
 //   has the app open.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BUILD    = '2025-05-01';
+const BUILD    = '2026-05-01c';
 const CACHE    = 'recipe-ripper-' + BUILD;
 const APP_FILE = './recipe-ripper.html';
 
