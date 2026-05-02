@@ -856,7 +856,7 @@ function load(key,def){try{const s=localStorage.getItem(key);return s?JSON.parse
 function save(key,val){try{localStorage.setItem(key,JSON.stringify(val));}catch(e){}}
 let recipes=load('k_recipes',null)||[SOURDOUGH];
 let shoppingList=load('k_shoplist',[]);
-let nextId=Math.max(...recipes.map(r=>r.id),1)+1;
+let nextId=Math.max(...recipes.map(r=>r.id).filter(Number.isFinite),0)+1;
 function saveRecipes(){save('k_recipes',recipes);}
 function saveShopList(){save('k_shoplist',shoppingList);}
 
@@ -1685,7 +1685,7 @@ function renderDetail(){
 //  GUIDED
 // ═══════════════════════════════════════
 function renderGuided(){
-  const r=getRecipe();if(!r){render();return;}
+  const r=getRecipe();if(!r){state.view='list';render();return;}
   if(!r.steps||!r.steps.length){
     showToast('This recipe has no steps — add them in the edit view');
     go('detail',{id:r.id});return;
@@ -3743,8 +3743,12 @@ function saveFromPreview(andCook){
   resetForm();
   if(p.source==='scan')scanReset();
   state.previewData=null;
-  if(andCook){go('guided',{id:newId});showToast('Recipe saved!');}
-  else{go('list');showToast('Recipe saved!');}
+  showToast('Recipe saved!');
+  if(andCook){
+    // Guard: if newId is somehow NaN (corrupt localStorage), fall back to list
+    if(!Number.isFinite(newId)){go('list');return;}
+    go('guided',{id:newId});
+  } else {go('list');}
 }
 // ═══════════════════════════════════════
 //  CALORIE CALCULATION  (USDA + Groq fallback)
