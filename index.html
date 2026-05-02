@@ -664,6 +664,118 @@
     .fade-up{animation:fadeUp .22s ease forwards;}
     /* ── DIVIDER ── */
     hr.div{border:none;border-top:1px solid var(--border);margin:4px 0;}
+    /* ── KEEP COOKING PILL ── */
+    @keyframes slideUpPill{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+    .keep-cooking-pill{
+      position:fixed;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom,0px) + 10px);
+      left:50%;transform:translateX(-50%);z-index:350;
+      background:var(--terra);color:#fff;border-radius:100px;
+      padding:11px 8px 11px 18px;
+      display:flex;align-items:center;gap:8px;
+      box-shadow:0 6px 24px rgba(212,112,90,.5);
+      font-size:.86rem;font-weight:700;border:none;font-family:inherit;
+      white-space:nowrap;max-width:calc(100vw - 32px);cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+      animation:slideUpPill .3s ease;
+    }
+    .keep-cooking-pill .pill-name{
+      opacity:.85;font-weight:500;max-width:130px;
+      overflow:hidden;text-overflow:ellipsis;
+    }
+    .pill-close{
+      background:rgba(0,0,0,.18);border:none;color:#fff;
+      border-radius:50%;width:26px;height:26px;font-size:13px;
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;flex-shrink:0;padding:0;font-family:inherit;
+      -webkit-tap-highlight-color:transparent;
+    }
+    /* ── DONE COOKING MODAL ── */
+    .done-modal-overlay{
+      position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);
+      display:flex;align-items:flex-end;justify-content:center;
+    }
+    .done-modal-sheet{
+      background:#fff;border-radius:20px 20px 0 0;overflow:hidden;
+      padding-top:32px;
+      padding-left:32px;
+      padding-right:32px;
+      padding-bottom:32px;
+      width:100%;max-width:480px;box-sizing:border-box;
+    }
+    .done-modal-title{font-size:1.15rem;font-weight:800;margin-bottom:8px;}
+    .done-modal-sub{
+      font-size:.88rem;color:var(--text-2);margin-bottom:22px;line-height:1.6;
+      word-break:break-word;white-space:normal;overflow-wrap:break-word;
+    }
+    /* ── CHEF CHAT ── */
+    .chef-overlay{
+      position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,.42);
+      opacity:0;pointer-events:none;transition:opacity .22s;
+    }
+    .chef-overlay.open{opacity:1;pointer-events:all;}
+    .chef-sheet{
+      position:fixed;left:0;right:0;bottom:0;z-index:8001;
+      background:#fff;border-radius:22px 22px 0 0;
+      height:68dvh;display:flex;flex-direction:column;
+      transform:translateY(100%);transition:transform .28s cubic-bezier(.32,.72,0,1);
+    }
+    .chef-sheet.open{transform:translateY(0);}
+    .chef-header{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:14px 18px 10px;border-bottom:1px solid var(--border);flex-shrink:0;
+    }
+    .chef-header-left{display:flex;align-items:center;gap:8px;}
+    .chef-spark{font-size:1.1rem;color:var(--terra);}
+    .chef-title{font-size:.95rem;font-weight:700;}
+    .chef-step-ctx{font-size:.72rem;color:var(--text-3);margin-top:1px;}
+    .chef-messages{
+      flex:1;overflow-y:auto;padding:12px 16px 8px;
+      display:flex;flex-direction:column;gap:9px;
+      -webkit-overflow-scrolling:touch;
+    }
+    .chef-msg{
+      max-width:86%;padding:10px 14px;border-radius:18px;
+      font-size:.875rem;line-height:1.6;word-break:break-word;
+    }
+    .chef-msg.user{
+      align-self:flex-end;background:var(--terra);color:#fff;
+      border-bottom-right-radius:5px;
+    }
+    .chef-msg.ai{
+      align-self:flex-start;background:var(--bg-2);color:var(--text);
+      border-bottom-left-radius:5px;
+    }
+    .chef-msg.typing{color:var(--text-3);font-style:italic;}
+    .chef-input-row{
+      display:flex;align-items:flex-end;gap:8px;
+      padding:10px 14px max(14px,calc(env(safe-area-inset-bottom,0px)+10px));
+      border-top:1px solid var(--border);flex-shrink:0;
+    }
+    .chef-input{
+      flex:1;background:var(--bg-2);border:1.5px solid var(--border);
+      border-radius:20px;padding:10px 14px;font-size:.9rem;
+      font-family:inherit;color:var(--text);outline:none;
+      resize:none;line-height:1.45;max-height:90px;overflow-y:auto;
+      -webkit-appearance:none;
+    }
+    .chef-input:focus{border-color:var(--terra);}
+    .chef-send{
+      width:42px;height:42px;border-radius:50%;background:var(--terra);
+      border:none;color:#fff;display:flex;align-items:center;justify-content:center;
+      cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent;
+      transition:opacity .15s;
+    }
+    .chef-send:disabled{opacity:.4;cursor:default;}
+    .chef-send svg{width:18px;height:18px;}
+    /* chef fab button inside guided footer */
+    .chef-fab{
+      width:48px;height:48px;border-radius:50%;background:var(--terra);border:none;
+      color:#fff;font-size:1.25rem;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      box-shadow:0 4px 16px rgba(212,112,90,.4);
+      -webkit-tap-highlight-color:transparent;pointer-events:all;
+      transition:transform .12s;
+    }
   </style>
 </head>
 <body>
@@ -1082,6 +1194,8 @@ let state={
   _resumeGuided:false,   // return to guided when tapping Recipe tab from timers
   stepIndex:0,
   scale:1,
+  _cookingRecipeId:null,   // recipe currently in-progress (for Keep Cooking pill)
+  _cookingStepIndex:0,     // step to resume at
   timer:{...TIMER_ZERO},
   qt:{remaining:0,total:0,running:false,done:false,_id:null,endTime:null,preset:null},
   addForm:{
@@ -1450,14 +1564,42 @@ function go(view,opts={}){
   if(view!=='full')stopTimer();
   state.view=view;state.tab='recipes';
   if(opts.id!==undefined)state.activeRecipeId=opts.id;
-  if(view==='guided'){state.stepIndex=0;state.timer={...TIMER_ZERO};}
+  if(view==='guided'){
+    // Starting fresh — reset step and chat. _cookingRecipeId is only set
+    // when user explicitly confirms they're stepping away (Yes → exit modal).
+    state.stepIndex=0;state.timer={...TIMER_ZERO};
+    state._cookingRecipeId=null;state._cookingStepIndex=0;
+    chefChatMsgs=[];
+  }
   if(view==='detail')state.detailTab='ingredients';
+  render();
+}
+function resumeCooking(){
+  // Keep Cooking pill — resume at saved step
+  const id=state._cookingRecipeId;
+  const step=state._cookingStepIndex;
+  if(!Number.isFinite(id))return;
+  stopTimer();
+  state.view='guided';state.tab='recipes';
+  state.activeRecipeId=id;
+  state.stepIndex=step;
+  state.timer={...TIMER_ZERO};
+  render();
+}
+function dismissKeepCooking(e){
+  e.stopPropagation();
+  state._cookingRecipeId=null;
+  state._cookingStepIndex=0;
   render();
 }
 function goNext(){
   const r=getRecipe();if(!r)return;
   stopTimer();
-  if(state.stepIndex>=r.steps.length-1){state.view='complete';render();return;}
+  if(state.stepIndex>=r.steps.length-1){
+    // Recipe finished — clear the in-progress tracker
+    state._cookingRecipeId=null;state._cookingStepIndex=0;
+    state.view='complete';render();return;
+  }
   state.stepIndex++;state.timer={...TIMER_ZERO};render();
 }
 function goPrev(){
@@ -1490,6 +1632,63 @@ function showToast(msg){
   el._tid=setTimeout(()=>el.classList.remove('show'),2600);
 }
 // ═══════════════════════════════════════
+//  KEEP COOKING / EXIT GUARD
+// ═══════════════════════════════════════
+function exitCookingCheck(recipeId){
+  // Always ask — on every step, including the first
+  showDoneCookingModal(recipeId);
+}
+function showDoneCookingModal(recipeId){
+  document.getElementById('done-cooking-modal')?.remove();
+  const r=recipes.find(x=>x.id===recipeId);
+  const total=r?.steps?.length||'?';
+  const el=document.createElement('div');
+  el.id='done-cooking-modal';el.className='done-modal-overlay';
+  el.innerHTML=`
+    <div class="done-modal-sheet" onclick="event.stopPropagation()">
+      <div class="done-modal-title">Are you coming back?</div>
+      <div class="done-modal-sub">You're on step ${state.stepIndex+1} of ${total}.</div>
+      <div style="display:flex;gap:12px;margin-top:20px">
+        <button class="btn btn-terra btn-full" onclick="exitCookingConfirmed(${recipeId})">Yes</button>
+        <button class="btn btn-outline btn-full" onclick="exitCookingNoResume(${recipeId})">No</button>
+      </div>
+    </div>`;
+  el.onclick=exitCookingNoResume.bind(null,recipeId);
+  document.body.appendChild(el);
+}
+function keepCookingFromModal(){
+  document.getElementById('done-cooking-modal')?.remove();
+}
+function exitCookingConfirmed(recipeId){
+  // Yes — leaving but coming back → show Keep Cooking pill
+  document.getElementById('done-cooking-modal')?.remove();
+  state._cookingRecipeId=recipeId;
+  state._cookingStepIndex=state.stepIndex;
+  closeChefChat();
+  go('detail',{id:recipeId});
+}
+function exitCookingNoResume(recipeId){
+  // No — done for good → exit with no pill
+  document.getElementById('done-cooking-modal')?.remove();
+  state._cookingRecipeId=null;
+  state._cookingStepIndex=0;
+  closeChefChat();
+  go('detail',{id:recipeId});
+}
+function keepCookingPillHTML(){
+  if(!state._cookingRecipeId||state.view==='guided')return'';
+  const r=recipes.find(x=>x.id===state._cookingRecipeId);if(!r)return'';
+  const step=state._cookingStepIndex;
+  return`<button class="keep-cooking-pill" onclick="resumeCooking()">
+    <span style="display:flex;align-items:center;gap:6px">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Keep Cooking · Step ${step+1}
+    </span>
+    <span class="pill-name">${escH(r.name)}</span>
+    <button class="pill-close" onclick="dismissKeepCooking(event)">✕</button>
+  </button>`;
+}
+// ═══════════════════════════════════════
 //  BOTTOM NAV
 // ═══════════════════════════════════════
 function bnavHTML(){
@@ -1498,7 +1697,7 @@ function bnavHTML(){
     {id:'shoplist',label:'Shop List',icon:I.list},
     {id:'timers',label:'Timer',icon:I.clock},
   ];
-  return`<nav class="bnav">${tabs.map(t=>`
+  return keepCookingPillHTML()+`<nav class="bnav">${tabs.map(t=>`
     <button class="bnav-tab ${state.tab===t.id&&state.view!=='guided'?'active':''}" onclick="goTab('${t.id}')">
       ${t.icon}<span>${t.label}</span>
     </button>`).join('')}</nav>`;
@@ -1683,6 +1882,105 @@ function renderDetail(){
     </div>${bnavHTML()}`;
 }
 // ═══════════════════════════════════════
+//  CHEF CHAT (AI cooking assistant)
+// ═══════════════════════════════════════
+let chefChatMsgs=[];
+let chefChatBusy=false;
+function ensureChefDOM(){
+  if(document.getElementById('chef-overlay'))return;
+  const el=document.createElement('div');
+  el.id='chef-overlay';el.className='chef-overlay';
+  el.onclick=closeChefChat;
+  el.innerHTML=`
+    <div class="chef-sheet" id="chef-sheet" onclick="event.stopPropagation()">
+      <div class="chef-header">
+        <div class="chef-header-left">
+          <span class="chef-spark">✦</span>
+          <div>
+            <div class="chef-title">Chef Assistant</div>
+            <div class="chef-step-ctx" id="chef-ctx"></div>
+          </div>
+        </div>
+        <button class="ibtn" onclick="closeChefChat()">${I.close}</button>
+      </div>
+      <div class="chef-messages" id="chef-msgs"></div>
+      <div class="chef-input-row">
+        <textarea class="chef-input" id="chef-input" rows="1"
+          placeholder="Ask anything about this step…"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChefMsg();}"
+          oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,88)+'px'"></textarea>
+        <button class="chef-send" id="chef-send" onclick="sendChefMsg()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+}
+function openChefChat(){
+  ensureChefDOM();
+  const r=getRecipe();
+  const step=r?.steps?.[state.stepIndex];
+  // Update context line
+  const ctx=document.getElementById('chef-ctx');
+  if(ctx&&r)ctx.textContent=`Step ${state.stepIndex+1}/${r.steps.length}${step?.phase?' · '+step.phase:''}`;
+  renderChefMsgs();
+  document.getElementById('chef-overlay').classList.add('open');
+  document.getElementById('chef-sheet').classList.add('open');
+  setTimeout(()=>document.getElementById('chef-input')?.focus(),320);
+}
+function closeChefChat(){
+  document.getElementById('chef-overlay')?.classList.remove('open');
+  document.getElementById('chef-sheet')?.classList.remove('open');
+}
+function renderChefMsgs(){
+  const box=document.getElementById('chef-msgs');if(!box)return;
+  if(!chefChatMsgs.length){
+    const r=getRecipe();
+    const name=r?escH(r.name):'this recipe';
+    box.innerHTML=`<div class="chef-msg ai">Hi! I'm your cooking assistant for <strong>${name}</strong>. Ask me anything about this step, an ingredient, or a technique!</div>`;
+    return;
+  }
+  box.innerHTML=chefChatMsgs.map(m=>
+    `<div class="chef-msg ${m.role==='user'?'user':'ai'}">${escH(m.text).replace(/\n/g,'<br>')}</div>`
+  ).join('');
+  // If last msg is AI, render links/bold by not escaping (safe since it's our own text)
+  box.scrollTop=box.scrollHeight;
+}
+async function sendChefMsg(){
+  const inp=document.getElementById('chef-input');
+  const text=(inp?.value||'').trim();
+  if(!text||chefChatBusy)return;
+  const r=getRecipe();
+  const step=r?.steps?.[state.stepIndex];
+  chefChatMsgs.push({role:'user',text});
+  inp.value='';inp.style.height='auto';
+  renderChefMsgs();
+  chefChatBusy=true;
+  const sendBtn=document.getElementById('chef-send');
+  if(sendBtn)sendBtn.disabled=true;
+  // Show typing indicator
+  const box=document.getElementById('chef-msgs');
+  const typing=document.createElement('div');
+  typing.className='chef-msg ai typing';typing.id='chef-typing';typing.textContent='Thinking…';
+  box?.appendChild(typing);box&&(box.scrollTop=box.scrollHeight);
+  try{
+    const context=r
+      ?`You are a knowledgeable, friendly cooking assistant. The user is cooking "${r.name}". `+
+        `They are on step ${state.stepIndex+1} of ${r.steps.length}: "${step?.instructions||''}". `+
+        `Answer cooking questions concisely and practically. Keep responses brief and helpful. No markdown headers.`
+      :'You are a helpful cooking assistant. Answer cooking questions concisely.';
+    const data=await callGroq([],`${context}\n\nUser: ${text}`);
+    const reply=(data.choices?.[0]?.message?.content||'').trim();
+    chefChatMsgs.push({role:'assistant',text:reply});
+  }catch(e){
+    chefChatMsgs.push({role:'assistant',text:'Sorry, I couldn\'t reach the AI right now. Check your connection and try again.'});
+  }
+  chefChatBusy=false;
+  if(sendBtn)sendBtn.disabled=false;
+  document.getElementById('chef-typing')?.remove();
+  renderChefMsgs();
+}
+// ═══════════════════════════════════════
 //  GUIDED
 // ═══════════════════════════════════════
 function renderScaledSheetRows(rid){
@@ -1757,7 +2055,7 @@ function renderGuided(){
   document.getElementById('app').innerHTML=`
     <div class="guided-shell">
       <div class="guided-top">
-        <button class="ibtn" onclick="go('detail',{id:${r.id}})">${I.back}</button>
+        <button class="ibtn" onclick="exitCookingCheck(${r.id})">${I.back}</button>
         <div class="guided-label">Step ${idx+1} of ${total}</div>
       </div>
       <div class="guided-prog"><div class="guided-prog-fill" style="width:${pct}%"></div></div>
@@ -1770,8 +2068,9 @@ function renderGuided(){
       </div>
       <div class="guided-footer">
         <div class="guided-footer-left">
-          <button class="rbtn rbtn-white" onclick="go('detail',{id:${r.id}})" title="Recipe overview">${I.book}</button>
+          <button class="rbtn rbtn-white" onclick="exitCookingCheck(${r.id})" title="Recipe overview">${I.book}</button>
           ${totalIngrCount?`<button class="rbtn rbtn-white" onclick="openIngrSheet()" title="View ingredients" style="font-size:.6rem;font-weight:700;letter-spacing:.3px">INGR</button>`:''}
+          <button class="chef-fab" onclick="openChefChat()" title="Ask Chef AI">✦</button>
         </div>
         <button class="rbtn rbtn-white" onclick="goPrev()" ${idx===0?'disabled':''}>${I.back}</button>
         <button class="rbtn rbtn-terra" onclick="goNext()">${idx===total-1?I.check:I.fwd}</button>
@@ -1785,6 +2084,8 @@ function renderGuided(){
       </div>`:''}
     </div>`;
   attachSwipe();bindTimerBtns();
+  // If chat was open before re-render, keep it open
+  ensureChefDOM();
 }
 // ═══════════════════════════════════════
 //  COMPLETE
