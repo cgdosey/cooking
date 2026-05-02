@@ -1155,7 +1155,7 @@ Rules:
 - If the recipe naturally has sections (e.g. sauce + pasta, or levain + dough), use multiple ingredient sections
 - servings: e.g. "4 servings"
 - course: one of Breakfast,Brunch,Lunch,Dinner,Dessert,Snack,Appetizer,Side Dish,Soup,Salad`;
-    const data=await callGroq([],`${sysPrompt}\n\nUser request: ${promptText}`);
+    const data=await callGroq([],`${sysPrompt}\n\nUser request: ${promptText}`,{response_format:{type:'json_object'}});
     const raw=data.choices?.[0]?.message?.content||'';
     const result=parseGroqJSON(raw);
     if(!result||!result.name||!result.steps?.length){throw new Error('Could not generate a valid recipe. Try being more specific.');}
@@ -2634,7 +2634,7 @@ const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct'];
 // e.g. 'https://recipe-ripper.cgdosey.workers.dev'
 const GROQ_PROXY='https://lingering-sun-b693.christiangodsey.workers.dev';
 // USDA FoodData Central API key — free at https://fdc.nal.usda.gov/api-guide.html
-async function callGroq(images,prompt){
+async function callGroq(images,prompt,extraParams={}){
   // Use proxy if configured (key stays server-side), otherwise fall back to user's own key
   const proxy=GROQ_PROXY.trim();
   const key=proxy?'':getGroqKey();
@@ -2648,7 +2648,7 @@ async function callGroq(images,prompt){
       const payload=JSON.stringify({model,messages:[{role:'user',content:[
         ...images.map(img=>({type:'image_url',image_url:{url:img}})),
         {type:'text',text:prompt}
-      ]}],temperature:0.1,max_tokens:2048});
+      ]}],temperature:0.1,max_tokens:2048,...extraParams});
       const controller=new AbortController();
       const tid=setTimeout(()=>controller.abort(),90000);
       let resp;
@@ -2710,20 +2710,37 @@ function parseIngrText(text){
   return sections.length?sections:[{section:'Ingredients',items:[]}];
 }
 function parseGroqJSON(raw){
-  // Strip markdown fences
+  if(!raw)throw new Error('Empty response from AI');
+  // 1. Strip markdown fences and leading/trailing whitespace
   let s=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
-  // Try direct parse
+  // 2. Direct parse (fastest path — works when model returns clean JSON)
   try{return JSON.parse(s);}catch(_){}
-  // Find the outermost balanced {...} block
-  const start=s.indexOf('{');
+  // 3. Find outermost { } or [ ] block
+  const fb=s.indexOf('{'),fa=s.indexOf('[');
+  let start=-1;
+  if(fb!==-1&&(fa===-1||fb<fa))start=fb;
+  else if(fa!==-1)start=fa;
   if(start===-1)throw new Error('No JSON object found in response');
+  const open=s[start],close=open==='{'?'}':']';
   let depth=0,end=-1;
   for(let i=start;i<s.length;i++){
-    if(s[i]==='{')depth++;
-    else if(s[i]==='}'){depth--;if(depth===0){end=i;break;}}
+    if(s[i]===open)depth++;
+    else if(s[i]===close){depth--;if(depth===0){end=i;break;}}
   }
   if(end===-1)throw new Error('Incomplete JSON in response');
-  try{return JSON.parse(s.slice(start,end+1));}catch(e){
+  let b=s.slice(start,end+1);
+  // 4. Try the extracted block as-is
+  try{return JSON.parse(b);}catch(_){}
+  // 5. Repair common model output issues:
+  //    - trailing commas before } or ]
+  //    - literal control chars (except \n \r \t which are handled below)
+  //    - literal newlines/tabs inside string values
+  b=b
+    .replace(/,(\s*[}\]])/g,'$1')                   // trailing commas
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'')   // control chars
+    // Replace literal newlines/tabs only inside JSON strings
+    .replace(/"((?:[^"\\]|\\.)*)"/g,(_,v)=>'"'+v.replace(/\n/g,'\\n').replace(/\r/g,'').replace(/\t/g,'\\t')+'"');
+  try{return JSON.parse(b);}catch(e){
     throw new Error('Could not parse recipe JSON: '+e.message);
   }
 }
