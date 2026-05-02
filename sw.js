@@ -1,17 +1,17 @@
 // Recipe Ripper — Service Worker
-// BUILD: 2026-05-01c
+// BUILD: 2026-05-01d
 // ─────────────────────────────────────────────────────────────────────────────
 // HOW UPDATES WORK
-//   When you deploy a new version of recipe-ripper.html, also update the
-//   BUILD date above (e.g. 2025-05-02). That single change makes browsers
-//   treat this as a new service worker, which kicks off the install → activate
-//   cycle and shows the "New version available" banner to anyone who already
-//   has the app open.
+//   When you deploy a new version of index.html, also update the BUILD date
+//   above (e.g. 2026-05-02). That single change makes browsers treat this as
+//   a new service worker, which kicks off the install → activate cycle and
+//   shows the "New version available" banner to anyone who already has the
+//   app open.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BUILD    = '2026-05-01c';
+const BUILD    = '2026-05-01d';
 const CACHE    = 'recipe-ripper-' + BUILD;
-const APP_FILE = './recipe-ripper.html';
+const APP_FILE = './index.html';
 
 // ── INSTALL ──────────────────────────────────────────────────────────────────
 // Cache the app shell immediately and skip the waiting phase so the new
@@ -52,7 +52,7 @@ self.addEventListener('fetch', e => {
   // Only intercept same-origin requests for the app file itself
   const isAppShell =
     request.mode === 'navigate' ||
-    url.pathname.endsWith('recipe-ripper.html') ||
+    url.pathname.endsWith('index.html') ||
     url.pathname === '/' ||
     url.pathname.endsWith('/');
 
