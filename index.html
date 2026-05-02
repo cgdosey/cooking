@@ -1684,6 +1684,22 @@ function renderDetail(){
 // ═══════════════════════════════════════
 //  GUIDED
 // ═══════════════════════════════════════
+function renderScaledSheetRows(rid){
+  const rr=recipes.find(x=>x.id===rid);if(!rr)return'';
+  const ms=rr.ingredients.length>1&&rr.ingredients.some(s=>s.section);
+  return rr.ingredients.map(sec=>
+    (ms&&sec.section?'<div class="ingr-sheet-sec">'+escH(sec.section)+'</div>':'')+
+    (sec.items||[]).map(it=>'<div class="ingr-sheet-row">'+escH(scaleIngredient(it,state.scale))+'</div>').join('')
+  ).join('');
+}
+function openIngrSheet(){
+  document.getElementById('ingr-overlay')?.classList.add('open');
+  document.getElementById('ingr-sheet')?.classList.add('open');
+}
+function closeIngrSheet(){
+  document.getElementById('ingr-overlay')?.classList.remove('open');
+  document.getElementById('ingr-sheet')?.classList.remove('open');
+}
 function renderGuided(){
   const r=getRecipe();if(!r){state.view='list';render();return;}
   if(!r.steps||!r.steps.length){
@@ -1768,22 +1784,6 @@ function renderGuided(){
       </div>`:''}
     </div>`;
   attachSwipe();bindTimerBtns();
-  window.renderScaledSheetRows=function(rid){
-    const rr=recipes.find(x=>x.id===rid);if(!rr)return'';
-    const ms=rr.ingredients.length>1&&rr.ingredients.some(s=>s.section);
-    return rr.ingredients.map(sec=>
-      (ms&&sec.section?'<div class="ingr-sheet-sec">'+escH(sec.section)+'</div>':'')+
-      (sec.items||[]).map(it=>'<div class="ingr-sheet-row">'+escH(scaleIngredient(it,state.scale))+'</div>').join('')
-    ).join('');
-  };
-  window.openIngrSheet=function(){
-    document.getElementById('ingr-overlay')?.classList.add('open');
-    document.getElementById('ingr-sheet')?.classList.add('open');
-  };
-  window.closeIngrSheet=function(){
-    document.getElementById('ingr-overlay')?.classList.remove('open');
-    document.getElementById('ingr-sheet')?.classList.remove('open');
-  };
 }
 // ═══════════════════════════════════════
 //  COMPLETE
