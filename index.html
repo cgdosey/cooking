@@ -2488,6 +2488,7 @@ function getGroqKey(){return localStorage.getItem('k_groq_key')||'';}
 function saveGroqKey(k){localStorage.setItem('k_groq_key',k.trim());}
 function renderSettings(){
   const cur=getGroqKey();
+  const count=recipes.filter(r=>r.id!==1||r.name!=='Country Sourdough').length+1;
   document.getElementById('app').innerHTML=`
     <div class="shell">
       <div class="topbar"><div class="topbar-row">
@@ -2495,7 +2496,36 @@ function renderSettings(){
         <div class="topbar-title">Settings</div>
         <div style="width:40px"></div>
       </div></div>
-      <div class="add-page" style="padding-bottom:40px">
+      <div class="add-page" style="padding-bottom:60px">
+
+        <!-- ── YOUR RECIPES ── -->
+        <div class="slabel" style="margin-bottom:8px">Your Recipes</div>
+        <div style="background:var(--bg-2);border-radius:14px;padding:14px 16px;margin-bottom:16px">
+          <div style="font-size:.88rem;color:var(--text-2);line-height:1.6;margin-bottom:14px">
+            You have <strong>${recipes.length} recipe${recipes.length!==1?'s':''}</strong> saved on this device.
+            Back them up before reinstalling the app — deleting the home screen bookmark <strong>erases all data</strong>.
+          </div>
+          <button class="btn btn-terra btn-full" onclick="exportRecipes()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export Recipes (backup)
+          </button>
+          <button class="btn btn-outline btn-full" style="margin-top:10px" onclick="document.getElementById('import-file').click()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import Recipes (restore)
+          </button>
+          <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importRecipes(this)"/>
+        </div>
+
+        <!-- ── HOW UPDATES WORK ── -->
+        <div class="slabel" style="margin-bottom:8px">How Updates Work</div>
+        <div style="background:var(--terra-bg);border-radius:14px;padding:14px 16px;margin-bottom:20px;border-left:3px solid var(--terra)">
+          <div style="font-size:.85rem;color:var(--text-1);line-height:1.7">
+            <strong>Don't delete your bookmark to update.</strong><br>
+            When a new version is available a banner appears at the top of the app — tap <em>Update</em> and it reloads with the new code. Your recipes are never touched.
+          </div>
+        </div>
+
+        <!-- ── GROQ API KEY ── -->
         <div class="slabel" style="margin-bottom:8px">Groq API Key</div>
         <p style="font-size:.85rem;color:var(--text-2);margin:0 0 12px;line-height:1.6">Required for importing recipes from URLs and reading photos. Get a free key at <a href="https://console.groq.com" target="_blank" style="color:var(--terra)">console.groq.com</a> → API Keys.</p>
         <input class="input" id="s-groq-key" type="password" value="${escH(cur)}" placeholder="gsk_…" style="font-family:monospace;font-size:.85rem"/>
@@ -2507,6 +2537,74 @@ function renderSettings(){
         ${cur?`<button class="btn btn-ghost btn-full" style="margin-top:8px;color:var(--danger)" onclick="localStorage.removeItem('k_groq_key');showToast('Key removed');go('list')">Remove Key</button>`:''}
       </div>
     </div>`;
+}
+function exportRecipes(){
+  try{
+    const payload={version:1,exported:new Date().toISOString(),recipes};
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`recipe-ripper-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1000);
+    showToast(`${recipes.length} recipe${recipes.length!==1?'s':''} exported ✓`);
+  }catch(e){showToast('Export failed — try again');}
+}
+function importRecipes(input){
+  const file=input?.files?.[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      const imported=Array.isArray(data)?data:(Array.isArray(data?.recipes)?data.recipes:null);
+      if(!imported?.length){showToast('No recipes found in file');return;}
+      // Show merge vs replace choice
+      showImportModal(imported);
+    }catch(err){showToast('Could not read file — is this a Recipe Ripper backup?');}
+    input.value='';
+  };
+  reader.readAsText(file);
+}
+function showImportModal(imported){
+  const existing=document.getElementById('import-modal');if(existing)existing.remove();
+  const el=document.createElement('div');
+  el.id='import-modal';el.className='done-modal-overlay';
+  el.innerHTML=`
+    <div class="done-modal-sheet" onclick="event.stopPropagation()">
+      <div class="done-modal-title">Import ${imported.length} recipe${imported.length!==1?'s':''}?</div>
+      <div class="done-modal-sub">
+        <strong>Merge</strong> adds imported recipes alongside your current ones.<br>
+        <strong>Replace all</strong> removes your current recipes first.
+      </div>
+      <button class="btn btn-terra btn-full" style="margin-top:4px" onclick="doImport(window._importBuf,false)">Merge with existing</button>
+      <button class="btn btn-outline btn-full" style="margin-top:10px;color:var(--danger);border-color:var(--danger)" onclick="doImport(window._importBuf,true)">Replace all</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="document.getElementById('import-modal').remove()">Cancel</button>
+    </div>`;
+  el.onclick=()=>el.remove();
+  window._importBuf=imported;
+  document.body.appendChild(el);
+}
+function doImport(imported,replaceAll){
+  document.getElementById('import-modal')?.remove();
+  if(replaceAll){
+    recipes=imported.map((r,i)=>({...r,id:i+1}));
+    nextId=recipes.length+1;
+  }else{
+    let id=nextId;
+    const existingNames=new Set(recipes.map(r=>r.name?.toLowerCase()));
+    for(const r of imported){
+      if(!existingNames.has(r.name?.toLowerCase())){
+        recipes.push({...r,id:id++});
+        existingNames.add(r.name?.toLowerCase());
+      }
+    }
+    nextId=id;
+  }
+  saveRecipes();
+  const n=replaceAll?imported.length:imported.filter(r=>!recipes.find(x=>x.name?.toLowerCase()===r.name?.toLowerCase()&&x.id!==undefined)).length;
+  showToast(`${replaceAll?'Replaced with':'Added'} ${imported.length} recipe${imported.length!==1?'s':''} ✓`);
+  go('list');
 }
 let scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[]};
 function scanReset(){scanForm={status:'idle',images:[],currentIdx:0,name:'',ingrText:'',steps:[],errorMsg:''};renderAdd();}
