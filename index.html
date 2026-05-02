@@ -1686,11 +1686,18 @@ function renderDetail(){
 // ═══════════════════════════════════════
 function renderGuided(){
   const r=getRecipe();if(!r){render();return;}
+  if(!r.steps||!r.steps.length){
+    showToast('This recipe has no steps — add them in the edit view');
+    go('detail',{id:r.id});return;
+  }
+  // Clamp stepIndex in case it somehow ended up out of bounds
+  if(state.stepIndex>=r.steps.length)state.stepIndex=r.steps.length-1;
+  if(state.stepIndex<0)state.stepIndex=0;
   const idx=state.stepIndex,total=r.steps.length,step=r.steps[idx];
   const pct=Math.round((idx/total)*100);
-  const color=pc(step.phase);
+  const color=pc(step&&step.phase);
   // Initialise timer state for this step if needed
-  if(step.timerMinutes&&state.timer.total===0&&!state.timer.done){
+  if(step&&step.timerMinutes&&state.timer.total===0&&!state.timer.done){
     state.timer={...TIMER_ZERO,remaining:step.timerMinutes*60,total:step.timerMinutes*60,label:step.timerLabel||''};
   }
   const t=state.timer;
