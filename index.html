@@ -3695,10 +3695,19 @@ function closePreview(){
 }
 function saveFromPreview(andCook){
   state._resumePreview=false;
-  // Defensive: if previewData was lost, try to recover from urlParsed
+  // Layer 1: state (normal path)
+  // Layer 2: urlParsed (if state was lost but addForm still has data)
   if(!state.previewData&&state.addForm.urlParsed){
     const u=state.addForm.urlParsed;
     state.previewData={source:'url',name:u.name||'',image:u.image||'',description:u.description||'',yield:u.yield||'',difficulty:u.difficulty||'Intermediate',cookware:u.cookware||[],ingredients:u.ingredients||[],steps:(u.steps||[]).map(s=>({...s})),prepTime:u.prepTime||'',cookTime:u.cookTime||'',totalTime:u.totalTime||'',course:u.course||'',cuisine:u.cuisine||'',calories:u.calories||'',notes:u.notes||''};
+  }
+  // Layer 3: DOM snapshot — the hidden input baked into the preview HTML at render time.
+  // This survives iOS backgrounding/state-loss because it lives in the DOM, not JS memory.
+  if(!state.previewData){
+    try{
+      const snap=document.getElementById('pv-snapshot')?.value;
+      if(snap)state.previewData=JSON.parse(snap);
+    }catch(e){}
   }
   const p=state.previewData;
   if(!p){showToast('No recipe to save');return;}
@@ -3970,6 +3979,7 @@ function renderPreview(){
           <label>Chef's Notes</label>
           <textarea class="input ta" id="pv-notes" rows="3" placeholder="Recipe tips, storage, substitutions…">${escH(p.notes||'')}</textarea>
         </div>
+        <input type="hidden" id="pv-snapshot" value="${escH(JSON.stringify(p))}"/>
         <button class="btn btn-terra btn-full btn-lg" style="margin-top:20px" onclick="saveFromPreview(true)">Save &amp; Start Cooking</button>
         <button class="btn btn-outline btn-full" style="margin-top:10px" onclick="saveFromPreview(false)">Save Recipe</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePreview()">← Back to Edit</button>
