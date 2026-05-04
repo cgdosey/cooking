@@ -707,6 +707,20 @@
       font-size:.88rem;color:var(--text-2);margin-bottom:22px;line-height:1.6;
       word-break:break-word;white-space:normal;overflow-wrap:break-word;
     }
+    /* ── FRIDGE / WHAT CAN I MAKE ── */
+    .fridge-section-label{
+      font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+      padding:16px 0 8px;display:flex;align-items:center;gap:6px;
+    }
+    .fridge-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+    .fridge-no-photo{
+      width:100%;height:120px;border:2px dashed var(--border);border-radius:14px;
+      background:var(--bg-2);cursor:pointer;border:none;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+      color:var(--text-3);font-size:.85rem;font-weight:600;font-family:inherit;
+      transition:border-color .2s,color .2s;
+    }
+    .fridge-no-photo:hover{border-color:var(--terra);color:var(--terra);}
     /* ── CHEF CHAT ── */
     .chef-overlay{
       position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,.42);
@@ -806,6 +820,7 @@ const I={
   list:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
   search:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
   camera:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`,
+  fridge:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="5" y1="10" x2="19" y2="10"/><line x1="10" y1="5" x2="10" y2="8"/><line x1="10" y1="14" x2="10" y2="17"/></svg>`,
 };
 // ═══════════════════════════════════════
 //  PHASES & COLORS
@@ -1196,6 +1211,8 @@ let state={
   scale:1,
   _cookingRecipeId:null,   // recipe currently in-progress (for Keep Cooking pill)
   _cookingStepIndex:0,     // step to resume at
+  fridgeIngr:'',           // "What can I make?" textarea content
+  fridgeResults:null,      // {can,almost,few,tokens} from last fridge search
   timer:{...TIMER_ZERO},
   qt:{remaining:0,total:0,running:false,done:false,_id:null,endTime:null,preset:null},
   addForm:{
@@ -1689,6 +1706,128 @@ function keepCookingPillHTML(){
   </button>`;
 }
 // ═══════════════════════════════════════
+//  WHAT CAN I MAKE  (fridge matching)
+// ═══════════════════════════════════════
+function extractIngrName(text){
+  // Strip leading quantity + compact metric unit (e.g. "35g", "1/2 cup", "2 lbs")
+  return text
+    .replace(/^[\d¼½¾⅓⅔⅛⅜⅝⅞\s\/\.]+\s*(?:g|kg|ml|l|oz|lbs?|tsp|tbsp|cups?|cloves?|bunch|can|pkg|pack|slices?|pieces?|pinch|handful|sprigs?|large|medium|small)?\s*/i,'')
+    .replace(/^(?:cups?|tbsp|tsp|oz|lbs?|grams?)\s+/i,'')
+    .toLowerCase()
+    .split(/,\s*|\s+(?:to taste|optional|divided|chopped|minced|diced|sliced|freshly|grated|crushed|roughly)/i)[0]
+    .trim();
+}
+function fridgeScore(recipe,fridgeTokens){
+  const allItems=(recipe.ingredients||[]).flatMap(s=>s.items||[]);
+  if(!allItems.length)return{score:0,matched:0,total:0};
+  let matched=0;
+  for(const item of allItems){
+    const name=extractIngrName(item);
+    for(const tok of fridgeTokens){
+      if(!tok)continue;
+      // match if the fridge token appears in the ingredient name or vice-versa
+      if(name.includes(tok)||tok.includes(name.split(' ')[0])){matched++;break;}
+    }
+  }
+  return{score:matched/allItems.length,matched,total:allItems.length};
+}
+function findFridgeMatches(text){
+  const tokens=text.split(/[\n,]+/)
+    .map(s=>s.trim().toLowerCase().replace(/^[\d\s\/¼½¾⅓⅔⅛.]+\s*(?:g|kg|ml|l|oz|lb|cup|tbsp|tsp)?\s*/i,'').trim())
+    .filter(s=>s.length>1);
+  if(!tokens.length)return null;
+  const can=[],almost=[],few=[];
+  for(const r of recipes){
+    const{score,matched,total}=fridgeScore(r,tokens);
+    if(score>=0.8)can.push({r,score,matched,total});
+    else if(score>=0.5)almost.push({r,score,matched,total});
+    else if(score>=0.3)few.push({r,score,matched,total});
+  }
+  can.sort((a,b)=>b.score-a.score);
+  almost.sort((a,b)=>b.score-a.score);
+  few.sort((a,b)=>b.score-a.score);
+  return{can,almost:almost.slice(0,6),few:few.slice(0,4),tokens};
+}
+function runFridgeMatch(){
+  const ta=document.getElementById('fridge-ingr');
+  state.fridgeIngr=ta?.value||'';
+  if(!state.fridgeIngr.trim()){showToast('Enter some ingredients first');return;}
+  state.fridgeResults=findFridgeMatches(state.fridgeIngr);
+  renderFridge();
+}
+function goGenerate(){
+  const tokens=(state.fridgeIngr||'').split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).join(', ');
+  state.addTab='ai';
+  aiGenState={status:'idle',prompt:`Make me something with: ${tokens}`,result:null,error:''};
+  state.view='add';render();
+}
+function renderFridge(){
+  const res=state.fridgeResults;
+  function matchCard({r,matched,total}){
+    const pct=Math.round((matched/total)*100);
+    const color=pct>=80?'#2A9D5C':'#B45309';
+    const img=r.image
+      ?`<img class="rc-img" src="${escH(r.image)}" alt="${escH(r.name)}" onerror="this.outerHTML='<div class=rc-img-ph>${escH(r.name.charAt(0))}</div>'">`
+      :`<div class="rc-img-ph">${escH(r.name.charAt(0))}</div>`;
+    return`<div class="recipe-card" onclick="go('detail',{id:${r.id}})">
+      ${img}
+      <div class="rc-body">
+        <div class="rc-name">${escH(r.name)}</div>
+        <div style="margin-top:5px">
+          <span style="background:${color}22;color:${color};border-radius:99px;padding:2px 9px;font-size:.72rem;font-weight:700">${matched}/${total} ingredients · ${pct}%</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  let resultsHTML='';
+  if(res){
+    if(!res.can.length&&!res.almost.length&&!res.few.length){
+      resultsHTML=`<div style="text-align:center;padding:40px 0">
+        <div style="font-size:2rem;margin-bottom:10px">🤔</div>
+        <div style="font-weight:700;font-size:.95rem;margin-bottom:6px">No matches found</div>
+        <div style="font-size:.84rem;color:var(--text-3);margin-bottom:18px">Try adding more ingredients.</div>
+        <button class="btn btn-outline" onclick="goGenerate()">✦ Generate a new recipe instead</button>
+      </div>`;
+    }else{
+      if(res.can.length){
+        resultsHTML+=`<div class="fridge-section-label" style="color:#2A9D5C"><span class="fridge-dot" style="background:#2A9D5C"></span>Ready to cook (${res.can.length})</div>`;
+        resultsHTML+=`<div class="card-list" style="padding:0 0 4px">${res.can.map(matchCard).join('')}</div>`;
+      }
+      if(res.almost.length){
+        resultsHTML+=`<div class="fridge-section-label" style="color:#B45309"><span class="fridge-dot" style="background:#B45309"></span>Almost there — missing a couple (${res.almost.length})</div>`;
+        resultsHTML+=`<div class="card-list" style="padding:0 0 4px">${res.almost.map(matchCard).join('')}</div>`;
+      }
+      if(res.few.length){
+        resultsHTML+=`<div class="fridge-section-label" style="color:var(--text-3)"><span class="fridge-dot" style="background:var(--text-3)"></span>Missing a few (${res.few.length})</div>`;
+        resultsHTML+=`<div class="card-list" style="padding:0 0 4px">${res.few.map(matchCard).join('')}</div>`;
+      }
+      resultsHTML+=`<div style="padding:20px 0 8px;border-top:1px solid var(--border);margin-top:8px">
+        <button class="btn btn-outline btn-full" onclick="goGenerate()">✦ Generate a new recipe with these ingredients</button>
+      </div>`;
+    }
+  }
+  document.getElementById('app').innerHTML=`
+    <div class="shell">
+      <div class="topbar">
+        <div class="topbar-row">
+          <button class="ibtn" onclick="go('list')">${I.back}</button>
+          <div style="font-size:1rem;font-weight:800;letter-spacing:-.2px">What Can I Make?</div>
+          <div style="width:40px"></div>
+        </div>
+      </div>
+      <div style="padding:4px 18px 80px">
+        <p style="font-size:.84rem;color:var(--text-2);line-height:1.65;padding:10px 0 10px">Enter what's in your fridge or pantry — one per line or comma-separated. I'll check your saved recipes first, then offer to generate something new.</p>
+        <textarea class="input ta" id="fridge-ingr" rows="5"
+          placeholder="chicken breast&#10;garlic&#10;lemon&#10;pasta&#10;parmesan…"
+          style="font-size:15px;margin-bottom:12px">${escH(state.fridgeIngr)}</textarea>
+        <button class="btn btn-terra btn-full" onclick="runFridgeMatch()" style="margin-bottom:8px">Find Matches</button>
+        ${resultsHTML}
+      </div>
+    </div>${bnavHTML()}`;
+  const ta=document.getElementById('fridge-ingr');
+  if(ta&&state.fridgeIngr)ta.value=state.fridgeIngr;
+}
+// ═══════════════════════════════════════
 //  BOTTOM NAV
 // ═══════════════════════════════════════
 function bnavHTML(){
@@ -1776,6 +1915,7 @@ function renderList(){
             <span class="topbar-wordmark">Recipe Ripper</span>
           </div>
           <div style="display:flex;gap:4px;align-items:center">
+            <button class="ibtn" onclick="go('fridge')" title="What can I make?" style="color:var(--terra)">${I.fridge}</button>
             <button class="topbar-add" onclick="go('add')" aria-label="Add recipe">${I.plus}</button>
           </div>
         </div>
@@ -4019,6 +4159,37 @@ function deleteRecipe(id){
   recipes=recipes.filter(r=>r.id!==id);saveRecipes();go('list');
 }
 // ═══════════════════════════════════════
+//  PREVIEW PHOTO UPLOAD
+// ═══════════════════════════════════════
+function uploadPreviewPhoto(){
+  let inp=document.getElementById('_preview-photo-input');
+  if(!inp){
+    inp=document.createElement('input');
+    inp.type='file';inp.id='_preview-photo-input';inp.accept='image/*';
+    inp.style.cssText='position:fixed;top:-9999px;opacity:0;pointer-events:none';
+    document.body.appendChild(inp);
+  }
+  inp.onchange=async()=>{
+    const file=inp.files?.[0];inp.value='';
+    if(!file)return;
+    try{
+      const dataURL=await normalizeFile(file);
+      const compressed=await compressImage(dataURL,1200,0.82);
+      if(state.previewData)state.previewData.image=compressed;
+      // Patch DOM — avoid full re-render which would reset form fields
+      const container=document.getElementById('pv-photo-container');
+      if(container){
+        container.innerHTML=`
+          <img src="${compressed}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;display:block" onerror="this.remove()">
+          <button onclick="uploadPreviewPhoto()" title="Change photo" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;backdrop-filter:blur(4px)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>`;
+      }
+    }catch(e){showToast('Could not load photo — try a different image');}
+  };
+  inp.click();
+}
+// ═══════════════════════════════════════
 //  RECIPE PREVIEW (before save)
 // ═══════════════════════════════════════
 // Jump directly to the combined Review & Save screen after URL or paste import
@@ -4376,7 +4547,18 @@ function renderPreview(){
         <div style="width:40px"></div>
       </div></div>
       <div class="add-page" style="padding-bottom:110px">
-        ${p.image?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;margin-bottom:16px" onerror="this.remove()">`:''}
+        <div id="pv-photo-container" style="position:relative;margin-bottom:16px">
+          ${p.image
+            ?`<img src="${escH(p.image)}" style="width:100%;height:200px;object-fit:cover;border-radius:14px;display:block" onerror="this.remove()">
+               <button onclick="uploadPreviewPhoto()" title="Change photo" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;backdrop-filter:blur(4px)">
+                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+               </button>`
+            :`<button class="fridge-no-photo" style="border:2px dashed var(--border)" onclick="uploadPreviewPhoto()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <span>Add a cover photo</span>
+              </button>`
+          }
+        </div>
         <div class="field">
           <label>Recipe Name</label>
           <input class="input" id="preview-name" value="${escH(p.name)}" placeholder="Recipe name"/>
@@ -4425,6 +4607,7 @@ function render(){
   if(state.view==='add'){renderAdd();return;}
   if(state.view==='preview'){renderPreview();return;}
   if(state.view==='settings'){renderSettings();return;}
+  if(state.view==='fridge'){renderFridge();return;}
   if(state.tab==='shoplist'){renderShopList();return;}
   if(state.tab==='timers'){renderTimers();return;}
   renderList();
