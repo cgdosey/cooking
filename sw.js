@@ -1,5 +1,5 @@
 // Recipe Ripper — Service Worker
-// BUILD: 2026-05-01d
+// BUILD: 2026-05-04a
 // ─────────────────────────────────────────────────────────────────────────────
 // HOW UPDATES WORK
 //   When you deploy a new version of index.html, also update the BUILD date
@@ -9,7 +9,7 @@
 //   app open.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BUILD    = '2026-05-01d';
+const BUILD    = '2026-05-04a';
 const CACHE    = 'recipe-ripper-' + BUILD;
 const APP_FILE = './index.html';
 
