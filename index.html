@@ -2867,9 +2867,11 @@ async function processScanFiles(fileList){
   scanForm={...scanForm,status:'viewing',images:[...scanForm.images,...dataURLs],currentIdx:wasEmpty?0:scanForm.currentIdx};
   renderAdd();
 }
-const GROQ_MODELS=['meta-llama/llama-4-scout-17b-16e-instruct'];
+// Groq decommissioned Llama 4 Scout (July 17, 2026).
+// Text calls use GPT-OSS 120B; image (vision) calls use Qwen3.6-27B.
+const GROQ_TEXT_MODELS=['openai/gpt-oss-120b','llama-3.3-70b-versatile'];
+const GROQ_VISION_MODELS=['qwen/qwen3.6-27b'];
 // Paste your Cloudflare Worker URL here after deploying groq-proxy-worker.js
-// e.g. 'https://recipe-ripper.cgdosey.workers.dev'
 const GROQ_PROXY='https://lingering-sun-b693.christiangodsey.workers.dev';
 // USDA FoodData Central API key — free at https://fdc.nal.usda.gov/api-guide.html
 async function callGroq(images,prompt,extraParams={}){
@@ -2880,6 +2882,7 @@ async function callGroq(images,prompt,extraParams={}){
   const endpoint=proxy||'https://api.groq.com/openai/v1/chat/completions';
   const authHeader=proxy?{}:{'Authorization':`Bearer ${key}`};
   let lastErr='';
+  const GROQ_MODELS = images.length ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
   for(const model of GROQ_MODELS){
     try{
       console.log('→ trying model:',model,'via',proxy?'proxy':'direct');
@@ -2949,8 +2952,8 @@ function parseIngrText(text){
 }
 function parseGroqJSON(raw){
   if(!raw)throw new Error('Empty response from AI');
-  // 1. Strip markdown fences and leading/trailing whitespace
-  let s=raw.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
+  // 1. Strip reasoning-model <think> blocks, then markdown fences and whitespace
+  let s=raw.replace(/<think>[\s\S]*?<\/think>/gi,'').replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();
   // 2. Direct parse (fastest path — works when model returns clean JSON)
   try{return JSON.parse(s);}catch(_){}
   // 3. Find outermost { } or [ ] block
